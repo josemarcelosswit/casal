@@ -46,7 +46,15 @@ export default function App() {
     const savedTransactions = localStorage.getItem('financas_cadal_transactions');
     const savedDebts = localStorage.getItem('financas_cadal_debts');
     
-    if (savedTransactions) setTransactions(JSON.parse(savedTransactions));
+    if (savedTransactions) {
+      const parsed = JSON.parse(savedTransactions);
+      // Correction migration: rename 'Laser' to 'Lazer'
+      const corrected = parsed.map((t: any) => ({
+        ...t,
+        category: t.category === 'Laser' ? 'Lazer' : t.category
+      }));
+      setTransactions(corrected);
+    }
     
     if (savedDebts) {
       setDebts(JSON.parse(savedDebts));

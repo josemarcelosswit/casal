@@ -422,10 +422,10 @@ export default function App() {
                   Dívidas & Compromissos
                 </h2>
                 <Dialog>
-                  <DialogTrigger asChild>
-                    <Button variant="ghost" size="sm" className="font-bold text-[10px] text-blue-600 hover:text-blue-700 rounded-lg uppercase tracking-wider">
-                      + Adicionar
-                    </Button>
+                  <DialogTrigger 
+                    render={<Button variant="ghost" size="sm" className="font-bold text-[10px] text-blue-600 hover:text-blue-700 rounded-lg uppercase tracking-wider" />}
+                  >
+                    + Adicionar
                   </DialogTrigger>
                   <DialogContent className="rounded-2xl">
                     <DialogHeader>
@@ -616,10 +616,8 @@ function AddTransactionDialog({ onAdd }: { onAdd: (data: any) => void }) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button className="bg-blue-600 hover:bg-blue-700 shadow-sm gap-2">
-          <Plus className="h-4 w-4" /> Novo Lançamento
-        </Button>
+      <DialogTrigger render={<Button className="bg-blue-600 hover:bg-blue-700 shadow-sm gap-2" />}>
+        <Plus className="h-4 w-4" /> Novo Lançamento
       </DialogTrigger>
       <DialogContent className="sm:max-w-[425px] rounded-2xl border-none shadow-2xl">
         <DialogHeader>

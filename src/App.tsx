@@ -45,7 +45,12 @@ export default function App() {
   useEffect(() => {
     const savedTransactions = localStorage.getItem('financas_cadal_transactions');
     const savedDebts = localStorage.getItem('financas_cadal_debts');
+    const savedMonth = localStorage.getItem('financas_cadal_month');
     
+    if (savedMonth) {
+      setCurrentMonth(new Date(savedMonth));
+    }
+
     if (savedTransactions) {
       const parsed = JSON.parse(savedTransactions);
       // Correction migration: rename 'Laser' to 'Lazer'
@@ -88,6 +93,54 @@ export default function App() {
       localStorage.setItem('financas_cadal_debts', JSON.stringify(debts));
     }
   }, [debts, loading]);
+
+  // Save current month to LocalStorage
+  useEffect(() => {
+    if (!loading) {
+      localStorage.setItem('financas_cadal_month', currentMonth.toISOString());
+    }
+  }, [currentMonth, loading]);
+
+  const handleExportData = () => {
+    const data = {
+      transactions,
+      debts,
+      version: '1.0',
+      exportedAt: new Date().toISOString()
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `financas_familia_backup_${format(new Date(), 'yyyy-MM-dd')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportData = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target?.result as string);
+        if (data.transactions && data.debts) {
+          if (confirm('Isso irá substituir todos os seus dados atuais. Deseja continuar?')) {
+            setTransactions(data.transactions);
+            setDebts(data.debts);
+          }
+        } else {
+          alert('Arquivo de backup inválido.');
+        }
+      } catch (err) {
+        alert('Erro ao ler o arquivo de backup.');
+      }
+    };
+    reader.readAsText(file);
+  };
 
   const handleAddTransaction = (data: Partial<FinanceTransaction>) => {
     const newTransaction: FinanceTransaction = {
@@ -203,6 +256,34 @@ export default function App() {
           <div className="bg-emerald-50 text-emerald-700 font-bold text-[10px] px-3 py-1.5 rounded-lg border border-emerald-100 uppercase tracking-wider shadow-sm flex items-center gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
             Local
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleExportData}
+              className="text-[10px] font-bold uppercase tracking-wider h-8 rounded-lg border-slate-200"
+            >
+              Exportar
+            </Button>
+            <div className="relative">
+              <input
+                type="file"
+                id="import-data"
+                className="hidden"
+                accept=".json"
+                onChange={handleImportData}
+              />
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => document.getElementById('import-data')?.click()}
+                className="text-[10px] font-bold uppercase tracking-wider h-8 rounded-lg border-slate-200"
+              >
+                Importar
+              </Button>
+            </div>
           </div>
         </div>
       </header>

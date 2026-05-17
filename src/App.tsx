@@ -141,7 +141,6 @@ export default function App() {
       category: 'Geral',
       date: data.date || new Date().toISOString(),
       month: (data as any).customMonth || format(currentMonth, 'yyyy-MM'),
-      isSpouse: !!data.isSpouse,
       createdAt: new Date().toISOString()
     };
     setTransactions(prev => [newTransaction, ...prev]);
@@ -359,7 +358,6 @@ export default function App() {
                                     <p className="font-bold text-slate-700 leading-tight">{t.description}</p>
                                     <div className="flex items-center gap-2">
                                       <p className="text-[10px] text-slate-400 font-medium">{format(parseISO(t.date), 'dd MMM', { locale: ptBR })}</p>
-                                      {t.isSpouse && <span className="text-[8px] bg-indigo-50 text-indigo-600 px-1 rounded uppercase font-bold border border-indigo-100">Cônjuge</span>}
                                     </div>
                                   </div>
                                 </div>
@@ -578,7 +576,6 @@ function AddTransactionDialog({ onAdd }: { onAdd: (data: any) => void }) {
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [isSpouse, setIsSpouse] = useState(false);
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringMonths, setRecurringMonths] = useState('1');
 
@@ -594,7 +591,6 @@ function AddTransactionDialog({ onAdd }: { onAdd: (data: any) => void }) {
           amount: parseFloat(amount),
           description: `${description} (${i + 1}/${recurringMonths})`,
           date: nextDate.toISOString(),
-          isSpouse,
           customMonth: format(nextDate, 'yyyy-MM')
         });
       }
@@ -603,8 +599,7 @@ function AddTransactionDialog({ onAdd }: { onAdd: (data: any) => void }) {
         type,
         amount: parseFloat(amount),
         description,
-        date,
-        isSpouse
+        date
       });
     }
     
@@ -615,7 +610,6 @@ function AddTransactionDialog({ onAdd }: { onAdd: (data: any) => void }) {
   const reset = () => {
     setAmount('');
     setDescription('');
-    setIsSpouse(false);
     setIsRecurring(false);
     setRecurringMonths('1');
   };
@@ -691,19 +685,6 @@ function AddTransactionDialog({ onAdd }: { onAdd: (data: any) => void }) {
             </div>
 
             <div className="space-y-3 pt-2">
-              <div className="flex items-center space-x-3 ml-1 cursor-pointer group">
-                <input 
-                  type="checkbox" 
-                  id="spouse" 
-                  checked={isSpouse}
-                  onChange={(e) => setIsSpouse(e.target.checked)}
-                  className="w-4 h-4 rounded-md border-slate-300 text-blue-600 focus:ring-blue-600 transition-colors"
-                />
-                <Label htmlFor="spouse" className="text-xs font-semibold text-slate-600 cursor-pointer group-hover:text-slate-900 transition-colors">
-                  Esta é a renda do cônjuge?
-                </Label>
-              </div>
-
               <div className="flex items-center justify-between border-t border-slate-100 pt-3">
                 <div className="flex items-center space-x-3 ml-1 cursor-pointer group">
                   <input 

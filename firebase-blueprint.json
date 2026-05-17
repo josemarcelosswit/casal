@@ -24,7 +24,6 @@
         "description": { "type": "string" },
         "date": { "type": "string", "format": "date" },
         "month": { "type": "string", "description": "Format YYYY-MM" },
-        "isSpouse": { "type": "boolean", "description": "True if this is the spouse's income/expense" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "type", "amount", "date", "month"]

@@ -9,7 +9,6 @@ export interface FinanceTransaction {
   description: string;
   date: string; // ISO date
   month: string; // YYYY-MM
-  isSpouse: boolean;
   createdAt: string;
 }
 

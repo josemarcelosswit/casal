@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  PieChart, Pie, Cell, Legend 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
 } from 'recharts';
 import { 
   Wallet, TrendingDown, TrendingUp, Plus, Trash2, Calendar, 
@@ -22,10 +21,6 @@ import {
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { 
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue 
-} from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger 
 } from '@/components/ui/dialog';
@@ -52,13 +47,7 @@ export default function App() {
     }
 
     if (savedTransactions) {
-      const parsed = JSON.parse(savedTransactions);
-      // Correction migration: rename 'Laser' to 'Lazer'
-      const corrected = parsed.map((t: any) => ({
-        ...t,
-        category: t.category === 'Laser' ? 'Lazer' : t.category
-      }));
-      setTransactions(corrected);
+      setTransactions(JSON.parse(savedTransactions));
     }
     
     if (savedDebts) {
@@ -149,7 +138,7 @@ export default function App() {
       type: data.type as TransactionType,
       amount: data.amount || 0,
       description: data.description || '',
-      category: data.category || '',
+      category: 'Geral',
       date: data.date || new Date().toISOString(),
       month: (data as any).customMonth || format(currentMonth, 'yyyy-MM'),
       isSpouse: !!data.isSpouse,
@@ -194,15 +183,6 @@ export default function App() {
   }, { income: 0, expense: 0 });
 
   const balance = totals.income - totals.expense;
-
-  const chartData = filteredTransactions
-    .filter(t => t.type === 'expense')
-    .reduce((acc: any[], curr) => {
-      const existing = acc.find(a => a.name === curr.category);
-      if (existing) existing.value += curr.amount;
-      else acc.push({ name: curr.category, value: curr.amount });
-      return acc;
-    }, []);
 
   if (loading) {
     return (
@@ -363,7 +343,6 @@ export default function App() {
                       <thead>
                         <tr className="text-slate-400 text-left border-b border-slate-100">
                           <th className="pb-3 px-2 font-semibold uppercase text-[10px] tracking-wider">Lançamento</th>
-                          <th className="pb-3 px-2 font-semibold uppercase text-[10px] tracking-wider">Categoria</th>
                           <th className="pb-3 px-2 font-semibold uppercase text-[10px] tracking-wider text-right">Valor</th>
                         </tr>
                       </thead>
@@ -384,9 +363,6 @@ export default function App() {
                                     </div>
                                   </div>
                                 </div>
-                              </td>
-                              <td className="py-3 px-2">
-                                <span className="text-slate-500 italic text-xs">{t.category}</span>
                               </td>
                               <td className="py-3 px-2 text-right">
                                 <span className={`font-bold tabular-nums ${t.type === 'income' ? 'text-emerald-600' : 'text-slate-800'}`}>
@@ -432,35 +408,12 @@ export default function App() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="flex-1 flex flex-col px-6">
-                <Tabs defaultValue="chart" className="flex-1 flex flex-col">
-                  <TabsList className="bg-slate-100 p-1 rounded-xl w-fit mb-6">
-                    <TabsTrigger value="chart" className="text-xs font-bold rounded-lg px-4 data-[state=active]:shadow-sm">Gráfico</TabsTrigger>
-                    <TabsTrigger value="categories" className="text-xs font-bold rounded-lg px-4 data-[state=active]:shadow-sm">Categorias</TabsTrigger>
-                  </TabsList>
-                  
-                  <TabsContent value="chart" className="flex-1 flex items-end justify-around gap-6 pb-4">
-                    <BarIndicator label="Receita" value={totals.income} total={Math.max(totals.income, totals.expense)} color="bg-emerald-500" />
-                    <BarIndicator label="Fixos" value={totals.expense} total={Math.max(totals.income, totals.expense)} color="bg-slate-300" />
-                    <BarIndicator label="Ativos" value={debts.reduce((a, b) => a + b.remainingAmount, 0)} total={Math.max(totals.income, totals.expense)} color="bg-amber-400" />
-                    <BarIndicator label="Livre" value={Math.max(0, balance)} total={Math.max(totals.income, totals.expense)} color="bg-blue-500" />
-                  </TabsContent>
-                  
-                  <TabsContent value="categories" className="flex-1">
-                    <ScrollArea className="h-[180px] w-full">
-                      <div className="space-y-4 pr-4">
-                        {chartData.sort((a, b) => b.value - a.value).map((cat, idx) => (
-                          <div key={idx} className="space-y-1.5">
-                            <div className="flex justify-between items-center text-[11px] font-bold uppercase tracking-tight">
-                              <span className="text-slate-500">{cat.name}</span>
-                              <span className="text-slate-800">R$ {cat.value.toLocaleString('pt-BR')}</span>
-                            </div>
-                            <Progress value={(cat.value / (totals.expense || 1)) * 100} className="h-1.5 bg-slate-100" />
-                          </div>
-                        ))}
-                      </div>
-                    </ScrollArea>
-                  </TabsContent>
-                </Tabs>
+                <div className="flex items-end justify-around gap-6 pb-4 mt-6 flex-1">
+                  <BarIndicator label="Receita" value={totals.income} total={Math.max(totals.income, totals.expense)} color="bg-emerald-500" />
+                  <BarIndicator label="Fixos" value={totals.expense} total={Math.max(totals.income, totals.expense)} color="bg-slate-300" />
+                  <BarIndicator label="Ativos" value={debts.reduce((a, b) => a + b.remainingAmount, 0)} total={Math.max(totals.income, totals.expense)} color="bg-amber-400" />
+                  <BarIndicator label="Livre" value={Math.max(0, balance)} total={Math.max(totals.income, totals.expense)} color="bg-blue-500" />
+                </div>
               </CardContent>
             </Card>
 
@@ -624,15 +577,10 @@ function AddTransactionDialog({ onAdd }: { onAdd: (data: any) => void }) {
   const [type, setType] = useState<TransactionType>('expense');
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('');
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [isSpouse, setIsSpouse] = useState(false);
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringMonths, setRecurringMonths] = useState('1');
-
-  const categories = type === 'income' 
-    ? ['Salário', 'Bônus', 'Investimento', 'Outros']
-    : ['Moradia', 'Alimentação', 'Transporte', 'Lazer', 'Saúde', 'Educação', 'Contas', 'Outros'];
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -645,7 +593,6 @@ function AddTransactionDialog({ onAdd }: { onAdd: (data: any) => void }) {
           type,
           amount: parseFloat(amount),
           description: `${description} (${i + 1}/${recurringMonths})`,
-          category,
           date: nextDate.toISOString(),
           isSpouse,
           customMonth: format(nextDate, 'yyyy-MM')
@@ -656,7 +603,6 @@ function AddTransactionDialog({ onAdd }: { onAdd: (data: any) => void }) {
         type,
         amount: parseFloat(amount),
         description,
-        category,
         date,
         isSpouse
       });
@@ -669,7 +615,6 @@ function AddTransactionDialog({ onAdd }: { onAdd: (data: any) => void }) {
   const reset = () => {
     setAmount('');
     setDescription('');
-    setCategory('');
     setIsSpouse(false);
     setIsRecurring(false);
     setRecurringMonths('1');
@@ -731,18 +676,7 @@ function AddTransactionDialog({ onAdd }: { onAdd: (data: any) => void }) {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-1.5">
-                <Label htmlFor="category" className="text-[10px] font-bold uppercase text-slate-400 ml-1">Categoria</Label>
-                <Select required value={category} onValueChange={setCategory}>
-                  <SelectTrigger className="rounded-xl border-slate-200 h-11">
-                    <SelectValue placeholder="Escolha..." />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl">
-                    {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="grid gap-4">
               <div className="grid gap-1.5">
                 <Label htmlFor="date" className="text-[10px] font-bold uppercase text-slate-400 ml-1">Data</Label>
                 <Input 

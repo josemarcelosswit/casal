@@ -102,6 +102,7 @@ export default function App() {
   };
 
   const handleAddTransaction = (data: Partial<FinanceTransaction>) => {
+    const trxDate = data.date ? parseISO(data.date) : new Date();
     const newTransaction: FinanceTransaction = {
       id: Math.random().toString(36).substr(2, 9),
       userId: 'local-user',
@@ -110,7 +111,7 @@ export default function App() {
       description: data.description || '',
       category: 'Geral',
       date: data.date || new Date().toISOString(),
-      month: (data as any).customMonth || format(currentMonth, 'yyyy-MM'),
+      month: format(trxDate, 'yyyy-MM'),
       createdAt: new Date().toISOString()
     };
     setTransactions(prev => [newTransaction, ...prev]);
@@ -121,7 +122,16 @@ export default function App() {
   };
 
   const handleUpdateTransaction = (id: string, data: Partial<FinanceTransaction>) => {
-    setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...data } : t));
+    setTransactions(prev => prev.map(t => {
+      if (t.id === id) {
+        const updated = { ...t, ...data };
+        if (data.date) {
+          updated.month = format(parseISO(data.date), 'yyyy-MM');
+        }
+        return updated;
+      }
+      return t;
+    }));
   };
 
   const changeMonth = (offset: number) => {
@@ -130,7 +140,9 @@ export default function App() {
 
   // Filter transactions for current month
   const monthStr = format(currentMonth, 'yyyy-MM');
-  const filteredTransactions = transactions.filter(t => t.month === monthStr);
+  const filteredTransactions = transactions
+    .filter(t => t.month === monthStr)
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const totals = filteredTransactions.reduce((acc, curr) => {
     if (curr.type === 'income') acc.income += curr.amount;
@@ -234,6 +246,11 @@ export default function App() {
             label="Despesas Fixas" 
             amount={totals.expense} 
             color="slate" 
+          />
+          <KPICard 
+            label="Saldo Restante" 
+            amount={balance} 
+            color={balance >= 0 ? "emerald" : "amber"} 
           />
           <KPICard 
             label="Poupança" 
@@ -362,7 +379,7 @@ export default function App() {
                 <div className="flex items-end justify-around gap-6 pb-4 mt-6 flex-1">
                   <BarIndicator label="Receita" value={totals.income} total={Math.max(totals.income, totals.expense)} color="bg-emerald-500" />
                   <BarIndicator label="Fixos" value={totals.expense} total={Math.max(totals.income, totals.expense)} color="bg-slate-300" />
-                  <BarIndicator label="Livre" value={Math.max(0, balance)} total={Math.max(totals.income, totals.expense)} color="bg-blue-500" />
+                  <BarIndicator label="Sobra" value={Math.max(0, balance)} total={Math.max(totals.income, totals.expense)} color="bg-blue-500" />
                 </div>
               </CardContent>
             </Card>
@@ -498,29 +515,46 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringMonths, setRecurringMonths] = useState('1');
 
+  const reset = () => {
+    if (!initialData) {
+      setAmount('');
+      setDescription('');
+      setIsRecurring(false);
+      setRecurringMonths('1');
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Improved number parsing for Brazilian format (handle comma as decimal)
+    // If input type is "number", value is always dot-separated strings, but we handle just in case or for text inputs
+    const cleanAmount = amount.replace(',', '.');
+    const parsedAmount = parseFloat(cleanAmount);
+    
+    if (isNaN(parsedAmount)) return;
+
     if (!initialData && isRecurring && parseInt(recurringMonths) > 1) {
-      const baseDate = parseISO(date);
+      const baseDate = new Date(date + 'T12:00:00');
       for (let i = 0; i < parseInt(recurringMonths); i++) {
         const nextDate = addMonths(baseDate, i);
         onSave({
           type,
-          amount: parseFloat(amount),
+          amount: parsedAmount,
           description: `${description} (${i + 1}/${recurringMonths})`,
-          date: nextDate.toISOString(),
-          customMonth: format(nextDate, 'yyyy-MM')
+          date: nextDate.toISOString()
         });
       }
     } else {
       onSave({
         type,
-        amount: parseFloat(amount),
+        amount: parsedAmount,
         description,
         date: new Date(date + 'T12:00:00').toISOString()
       });
     }
+    
+    reset();
   };
 
   return (

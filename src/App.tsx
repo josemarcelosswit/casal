@@ -4,7 +4,7 @@ import {
 } from 'recharts';
 import { 
   Wallet, TrendingUp, Plus, Trash2, Calendar, 
-  ChevronLeft, ChevronRight, Receipt, History
+  ChevronLeft, ChevronRight, Receipt, History, Pencil
 } from 'lucide-react';
 import { format, subMonths, addMonths, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -118,6 +118,10 @@ export default function App() {
 
   const handleDeleteTransaction = (id: string) => {
     setTransactions(prev => prev.filter(t => t.id !== id));
+  };
+
+  const handleUpdateTransaction = (id: string, data: Partial<FinanceTransaction>) => {
+    setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...data } : t));
   };
 
   const changeMonth = (offset: number) => {
@@ -314,14 +318,17 @@ export default function App() {
                                 </span>
                               </td>
                               <td className="py-3 pl-2 text-right opacity-0 group-hover:opacity-100 transition-opacity">
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  onClick={() => handleDeleteTransaction(t.id)}
-                                  className="h-8 w-8 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
+                                <div className="flex items-center justify-end gap-1">
+                                  <EditTransactionDialog transaction={t} onUpdate={handleUpdateTransaction} />
+                                  <Button 
+                                    variant="ghost" 
+                                    size="icon" 
+                                    onClick={() => handleDeleteTransaction(t.id)}
+                                    className="h-8 w-8 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               </td>
                             </tr>
                           ))
@@ -432,47 +439,6 @@ function BarIndicator({ label, value, total, color }: { label: string, value: nu
 
 function AddTransactionDialog({ onAdd }: { onAdd: (data: any) => void }) {
   const [open, setOpen] = useState(false);
-  const [type, setType] = useState<TransactionType>('expense');
-  const [amount, setAmount] = useState('');
-  const [description, setDescription] = useState('');
-  const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [isRecurring, setIsRecurring] = useState(false);
-  const [recurringMonths, setRecurringMonths] = useState('1');
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (isRecurring && parseInt(recurringMonths) > 1) {
-      const baseDate = parseISO(date);
-      for (let i = 0; i < parseInt(recurringMonths); i++) {
-        const nextDate = addMonths(baseDate, i);
-        onAdd({
-          type,
-          amount: parseFloat(amount),
-          description: `${description} (${i + 1}/${recurringMonths})`,
-          date: nextDate.toISOString(),
-          customMonth: format(nextDate, 'yyyy-MM')
-        });
-      }
-    } else {
-      onAdd({
-        type,
-        amount: parseFloat(amount),
-        description,
-        date
-      });
-    }
-    
-    setOpen(false);
-    reset();
-  };
-
-  const reset = () => {
-    setAmount('');
-    setDescription('');
-    setIsRecurring(false);
-    setRecurringMonths('1');
-  };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -483,100 +449,177 @@ function AddTransactionDialog({ onAdd }: { onAdd: (data: any) => void }) {
         <DialogHeader>
           <DialogTitle className="font-heading text-xl">Adicionar Transação</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-6 mt-4">
-          <div className="flex bg-slate-100 p-1 rounded-xl shadow-inner border border-slate-200">
-            <button
-              type="button"
-              className={`flex-1 py-2 text-xs font-bold uppercase tracking-tight rounded-lg transition-all ${type === 'income' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400'}`}
-              onClick={() => setType('income')}
-            >
-              Receita
-            </button>
-            <button
-              type="button"
-              className={`flex-1 py-2 text-xs font-bold uppercase tracking-tight rounded-lg transition-all ${type === 'expense' ? 'bg-white text-rose-600 shadow-sm' : 'text-slate-400'}`}
-              onClick={() => setType('expense')}
-            >
-              Despesa
-            </button>
-          </div>
-
-          <div className="space-y-4">
-            <div className="grid gap-1.5">
-              <Label htmlFor="amount" className="text-[10px] font-bold uppercase text-slate-400 ml-1">Valor (R$)</Label>
-              <Input 
-                id="amount" 
-                type="number" 
-                placeholder="0,00" 
-                required 
-                step="0.01"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className="rounded-xl border-slate-200 h-11"
-              />
-            </div>
-
-            <div className="grid gap-1.5">
-              <Label htmlFor="description" className="text-[10px] font-bold uppercase text-slate-400 ml-1">Descrição</Label>
-              <Input 
-                id="description" 
-                placeholder="Ex: Aluguel, Supermercado..." 
-                required
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="rounded-xl border-slate-200 h-11"
-              />
-            </div>
-
-            <div className="grid gap-4">
-              <div className="grid gap-1.5">
-                <Label htmlFor="date" className="text-[10px] font-bold uppercase text-slate-400 ml-1">Data</Label>
-                <Input 
-                  id="date" 
-                  type="date" 
-                  required
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="rounded-xl border-slate-200 h-11"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-3 pt-2">
-              <div className="flex items-center justify-between border-t border-slate-100 pt-3">
-                <div className="flex items-center space-x-3 ml-1 cursor-pointer group">
-                  <input 
-                    type="checkbox" 
-                    id="recurring" 
-                    checked={isRecurring}
-                    onChange={(e) => setIsRecurring(e.target.checked)}
-                    className="w-4 h-4 rounded-md border-slate-300 text-blue-600 focus:ring-blue-600 transition-colors"
-                  />
-                  <Label htmlFor="recurring" className="text-xs font-semibold text-slate-600 cursor-pointer group-hover:text-slate-900 transition-colors">
-                    Repetir mensalmente?
-                  </Label>
-                </div>
-                
-                {isRecurring && (
-                  <div className="flex items-center gap-2">
-                    <Label className="text-[10px] font-bold uppercase text-slate-400">Meses:</Label>
-                    <Input 
-                      type="number" 
-                      min="2" 
-                      max="48"
-                      value={recurringMonths}
-                      onChange={(e) => setRecurringMonths(e.target.value)}
-                      className="w-16 h-8 text-xs rounded-lg text-center"
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 h-12 text-sm font-bold uppercase tracking-wider rounded-xl shadow-lg shadow-blue-100 mt-2">Salvar Transação</Button>
-        </form>
+        <TransactionForm 
+          onSave={(data) => {
+            onAdd(data);
+            setOpen(false);
+          }} 
+        />
       </DialogContent>
     </Dialog>
+  );
+}
+
+function EditTransactionDialog({ transaction, onUpdate }: { transaction: FinanceTransaction, onUpdate: (id: string, data: any) => void }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger render={
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          className="h-8 w-8 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg"
+        />
+      }>
+        <Pencil className="h-4 w-4" />
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-[425px] rounded-2xl border-none shadow-2xl">
+        <DialogHeader>
+          <DialogTitle className="font-heading text-xl">Editar Transação</DialogTitle>
+        </DialogHeader>
+        <TransactionForm 
+          initialData={transaction}
+          onSave={(data) => {
+            onUpdate(transaction.id, data);
+            setOpen(false);
+          }} 
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void, initialData?: FinanceTransaction }) {
+  const [type, setType] = useState<TransactionType>(initialData?.type || 'expense');
+  const [amount, setAmount] = useState(initialData?.amount.toString() || '');
+  const [description, setDescription] = useState(initialData?.description || '');
+  const [date, setDate] = useState(initialData ? format(parseISO(initialData.date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'));
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurringMonths, setRecurringMonths] = useState('1');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!initialData && isRecurring && parseInt(recurringMonths) > 1) {
+      const baseDate = parseISO(date);
+      for (let i = 0; i < parseInt(recurringMonths); i++) {
+        const nextDate = addMonths(baseDate, i);
+        onSave({
+          type,
+          amount: parseFloat(amount),
+          description: `${description} (${i + 1}/${recurringMonths})`,
+          date: nextDate.toISOString(),
+          customMonth: format(nextDate, 'yyyy-MM')
+        });
+      }
+    } else {
+      onSave({
+        type,
+        amount: parseFloat(amount),
+        description,
+        date: new Date(date + 'T12:00:00').toISOString()
+      });
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6 mt-4">
+      <div className="flex bg-slate-100 p-1 rounded-xl shadow-inner border border-slate-200">
+        <button
+          type="button"
+          className={`flex-1 py-2 text-xs font-bold uppercase tracking-tight rounded-lg transition-all ${type === 'income' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400'}`}
+          onClick={() => setType('income')}
+        >
+          Receita
+        </button>
+        <button
+          type="button"
+          className={`flex-1 py-2 text-xs font-bold uppercase tracking-tight rounded-lg transition-all ${type === 'expense' ? 'bg-white text-rose-600 shadow-sm' : 'text-slate-400'}`}
+          onClick={() => setType('expense')}
+        >
+          Despesa
+        </button>
+      </div>
+
+      <div className="space-y-4">
+        <div className="grid gap-1.5">
+          <Label htmlFor="amount" className="text-[10px] font-bold uppercase text-slate-400 ml-1">Valor (R$)</Label>
+          <Input 
+            id="amount" 
+            type="number" 
+            placeholder="0,00" 
+            required 
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className="rounded-xl border-slate-200 h-11"
+          />
+        </div>
+
+        <div className="grid gap-1.5">
+          <Label htmlFor="description" className="text-[10px] font-bold uppercase text-slate-400 ml-1">Descrição</Label>
+          <Input 
+            id="description" 
+            placeholder="Ex: Aluguel, Supermercado..." 
+            required
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            className="rounded-xl border-slate-200 h-11"
+          />
+        </div>
+
+        <div className="grid gap-4">
+          <div className="grid gap-1.5">
+            <Label htmlFor="date" className="text-[10px] font-bold uppercase text-slate-400 ml-1">Data</Label>
+            <Input 
+              id="date" 
+              type="date" 
+              required
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="rounded-xl border-slate-200 h-11"
+            />
+          </div>
+        </div>
+
+        {!initialData && (
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+              <div className="flex items-center space-x-3 ml-1 cursor-pointer group">
+                <input 
+                  type="checkbox" 
+                  id="recurring" 
+                  checked={isRecurring}
+                  onChange={(e) => setIsRecurring(e.target.checked)}
+                  className="w-4 h-4 rounded-md border-slate-300 text-blue-600 focus:ring-blue-600 transition-colors"
+                />
+                <Label htmlFor="recurring" className="text-xs font-semibold text-slate-600 cursor-pointer group-hover:text-slate-900 transition-colors">
+                  Repetir mensalmente?
+                </Label>
+              </div>
+              
+              {isRecurring && (
+                <div className="flex items-center gap-2">
+                  <Label className="text-[10px] font-bold uppercase text-slate-400">Meses:</Label>
+                  <Input 
+                    type="number" 
+                    min="2" 
+                    max="48"
+                    value={recurringMonths}
+                    onChange={(e) => setRecurringMonths(e.target.value)}
+                    className="w-16 h-8 text-xs rounded-lg text-center"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 h-12 text-sm font-bold uppercase tracking-wider rounded-xl shadow-lg shadow-blue-100 mt-2">
+        {initialData ? 'Atualizar Transação' : 'Salvar Transação'}
+      </Button>
+    </form>
   );
 }

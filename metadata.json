@@ -1,0 +1,6 @@
+{
+  "name": "Finanças em Família",
+  "description": "Organizador financeiro mensal completo para casais, com gestão de salários, despesas, dívidas e visualização gráfica.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

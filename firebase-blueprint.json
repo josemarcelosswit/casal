@@ -1,0 +1,62 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Transaction": {
+      "title": "Finance Transaction",
+      "description": "An income or expense entry",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "type": { "type": "string", "enum": ["income", "expense"] },
+        "category": { "type": "string" },
+        "amount": { "type": "number" },
+        "description": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "month": { "type": "string", "description": "Format YYYY-MM" },
+        "isSpouse": { "type": "boolean", "description": "True if this is the spouse's income/expense" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "type", "amount", "date", "month"]
+    },
+    "Debt": {
+      "title": "Long-term Debt",
+      "description": "A larger debt to be tracked",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "remainingAmount": { "type": "number" },
+        "dueDate": { "type": "string", "format": "date" },
+        "interestRate": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "totalAmount", "remainingAmount"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User document"
+    },
+    "/users/{userId}/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Monthly transactions for the user"
+    },
+    "/users/{userId}/debts/{debtId}": {
+      "schema": "Debt",
+      "description": "Large debts for the user"
+    }
+  }
+}

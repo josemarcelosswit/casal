@@ -3,16 +3,15 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
 } from 'recharts';
 import { 
-  Wallet, TrendingDown, TrendingUp, Plus, Trash2, Calendar, 
-  ChevronLeft, ChevronRight, LogOut, Receipt, History, Info,
-  CheckCircle2, AlertCircle
+  Wallet, TrendingUp, Plus, Trash2, Calendar, 
+  ChevronLeft, ChevronRight, Receipt, History
 } from 'lucide-react';
-import { format, subMonths, addMonths, startOfMonth, endOfMonth, parseISO } from 'date-fns';
+import { format, subMonths, addMonths, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 
 import { 
-  FinanceTransaction, FinanceDebt, TransactionType 
+  FinanceTransaction, TransactionType 
 } from './types';
 
 import { Button } from '@/components/ui/button';
@@ -24,8 +23,6 @@ import { Label } from '@/components/ui/label';
 import { 
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger 
 } from '@/components/ui/dialog';
-import { Progress } from '@/components/ui/progress';
-import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
@@ -34,12 +31,10 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
-  const [debts, setDebts] = useState<FinanceDebt[]>([]);
   
   // Load data from LocalStorage on mount
   useEffect(() => {
     const savedTransactions = localStorage.getItem('financas_cadal_transactions');
-    const savedDebts = localStorage.getItem('financas_cadal_debts');
     const savedMonth = localStorage.getItem('financas_cadal_month');
     
     if (savedMonth) {
@@ -48,22 +43,6 @@ export default function App() {
 
     if (savedTransactions) {
       setTransactions(JSON.parse(savedTransactions));
-    }
-    
-    if (savedDebts) {
-      setDebts(JSON.parse(savedDebts));
-    } else {
-      // Add the requested apartment debt as initial data if nothing is saved
-      const initialDebt: FinanceDebt = {
-        id: 'initial-apt-debt',
-        userId: 'local-user',
-        name: 'Apartamento',
-        totalAmount: 60000,
-        remainingAmount: 60000,
-        dueDate: format(addMonths(new Date(), 1), 'yyyy-MM-dd'),
-        createdAt: new Date().toISOString()
-      };
-      setDebts([initialDebt]);
     }
     
     setLoading(false);
@@ -76,13 +55,6 @@ export default function App() {
     }
   }, [transactions, loading]);
 
-  // Save debts to LocalStorage
-  useEffect(() => {
-    if (!loading) {
-      localStorage.setItem('financas_cadal_debts', JSON.stringify(debts));
-    }
-  }, [debts, loading]);
-
   // Save current month to LocalStorage
   useEffect(() => {
     if (!loading) {
@@ -93,7 +65,6 @@ export default function App() {
   const handleExportData = () => {
     const data = {
       transactions,
-      debts,
       version: '1.0',
       exportedAt: new Date().toISOString()
     };
@@ -116,10 +87,9 @@ export default function App() {
     reader.onload = (event) => {
       try {
         const data = JSON.parse(event.target?.result as string);
-        if (data.transactions && data.debts) {
+        if (data.transactions) {
           if (confirm('Isso irá substituir todos os seus dados atuais. Deseja continuar?')) {
             setTransactions(data.transactions);
-            setDebts(data.debts);
           }
         } else {
           alert('Arquivo de backup inválido.');
@@ -148,23 +118,6 @@ export default function App() {
 
   const handleDeleteTransaction = (id: string) => {
     setTransactions(prev => prev.filter(t => t.id !== id));
-  };
-
-  const handleAddDebt = (data: Partial<FinanceDebt>) => {
-    const newDebt: FinanceDebt = {
-      id: Math.random().toString(36).substr(2, 9),
-      userId: 'local-user',
-      name: data.name || '',
-      totalAmount: data.totalAmount || 0,
-      remainingAmount: data.remainingAmount || 0,
-      dueDate: data.dueDate || new Date().toISOString(),
-      createdAt: new Date().toISOString()
-    };
-    setDebts(prev => [newDebt, ...prev]);
-  };
-
-  const handleUpdateDebt = (id: string, amount: number) => {
-    setDebts(prev => prev.map(d => d.id === id ? { ...d, remainingAmount: amount } : d));
   };
 
   const changeMonth = (offset: number) => {
@@ -230,8 +183,6 @@ export default function App() {
             </Button>
           </div>
           
-          <Separator orientation="vertical" className="h-8 hidden sm:block" />
-          
           <div className="bg-emerald-50 text-emerald-700 font-bold text-[10px] px-3 py-1.5 rounded-lg border border-emerald-100 uppercase tracking-wider shadow-sm flex items-center gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
             Local
@@ -281,11 +232,6 @@ export default function App() {
             color="slate" 
           />
           <KPICard 
-            label="Dívidas Ativas" 
-            amount={debts.length > 0 ? debts.reduce((a, b) => a + b.remainingAmount, 0) : 0} 
-            color="amber" 
-          />
-          <KPICard 
             label="Poupança" 
             amount={totals.income > 0 ? ((balance / totals.income) * 100) : 0} 
             color="blue" 
@@ -294,7 +240,7 @@ export default function App() {
         </section>
 
         <div className="grid grid-cols-12 gap-6 pb-8">
-          <div className="col-span-12 lg:col-span-7 flex flex-col gap-6">
+          <div className="col-span-12 lg:col-span-8 flex flex-col gap-6">
             <Card className="flex-1 shadow-sm border-slate-200 rounded-2xl overflow-hidden flex flex-col">
               <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
                 <h2 className="font-bold text-slate-700 flex items-center gap-2 font-heading">
@@ -397,7 +343,7 @@ export default function App() {
             </Card>
           </div>
 
-          <div className="col-span-12 lg:col-span-5 flex flex-col gap-6">
+          <div className="col-span-12 lg:col-span-4 flex flex-col gap-6">
             <Card className="shadow-sm border-slate-200 rounded-2xl md:h-[350px] flex flex-col">
               <CardHeader className="pb-2">
                 <CardTitle className="text-lg font-bold flex items-center gap-2 font-heading">
@@ -409,94 +355,8 @@ export default function App() {
                 <div className="flex items-end justify-around gap-6 pb-4 mt-6 flex-1">
                   <BarIndicator label="Receita" value={totals.income} total={Math.max(totals.income, totals.expense)} color="bg-emerald-500" />
                   <BarIndicator label="Fixos" value={totals.expense} total={Math.max(totals.income, totals.expense)} color="bg-slate-300" />
-                  <BarIndicator label="Ativos" value={debts.reduce((a, b) => a + b.remainingAmount, 0)} total={Math.max(totals.income, totals.expense)} color="bg-amber-400" />
                   <BarIndicator label="Livre" value={Math.max(0, balance)} total={Math.max(totals.income, totals.expense)} color="bg-blue-500" />
                 </div>
-              </CardContent>
-            </Card>
-
-            <Card className="shadow-sm border-slate-200 rounded-2xl flex-1 flex flex-col min-h-[400px]">
-              <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
-                <h2 className="font-bold text-slate-700 flex items-center gap-2 font-heading">
-                  <TrendingDown className="h-5 w-5 text-amber-500" />
-                  Dívidas & Compromissos
-                </h2>
-                <Dialog>
-                  <DialogTrigger 
-                    render={<Button variant="ghost" size="sm" className="font-bold text-[10px] text-blue-600 hover:text-blue-700 rounded-lg uppercase tracking-wider" />}
-                  >
-                    + Adicionar
-                  </DialogTrigger>
-                  <DialogContent className="rounded-2xl">
-                    <DialogHeader>
-                      <DialogTitle className="font-heading">Nova Dívida</DialogTitle>
-                    </DialogHeader>
-                    <DebtForm onAdd={handleAddDebt} />
-                  </DialogContent>
-                </Dialog>
-              </div>
-              <CardContent className="p-4 flex-1 overflow-hidden">
-                <ScrollArea className="h-[350px] pr-4">
-                  <div className="space-y-4">
-                    {debts.length > 0 ? (
-                      debts.map((debt) => (
-                        <div key={debt.id} className="p-4 bg-white border border-slate-100 rounded-2xl hover:border-slate-200 hover:shadow-sm transition-all group">
-                          <div className="flex justify-between items-start mb-3">
-                            <div>
-                              <span className="text-sm font-bold text-slate-700 block mb-0.5">{debt.name}</span>
-                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">
-                                Vence em {format(parseISO(debt.dueDate), 'dd/MM/yyyy')}
-                              </span>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-sm font-bold text-slate-900 leading-none mb-1">R$ {debt.remainingAmount.toLocaleString('pt-BR')}</p>
-                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Saldo Devedor</p>
-                            </div>
-                          </div>
-                          
-                          <div className="space-y-2">
-                            <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                              <motion.div 
-                                className="h-full bg-amber-500 rounded-full" 
-                                initial={{ width: 0 }}
-                                animate={{ width: `${Math.min(100, (1 - debt.remainingAmount / debt.totalAmount) * 100)}%` }}
-                              />
-                            </div>
-                            <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-tighter">
-                              <span>Quitação: {Math.max(0, ((1 - debt.remainingAmount / debt.totalAmount) * 100)).toFixed(0)}%</span>
-                              <div className="flex gap-2">
-                                <button 
-                                  className="text-blue-600 hover:underline"
-                                  onClick={() => {
-                                    const newVal = prompt("Digite o novo saldo devedor:", debt.remainingAmount.toString());
-                                    if (newVal !== null && !isNaN(parseFloat(newVal))) handleUpdateDebt(debt.id, parseFloat(newVal));
-                                  }}
-                                >
-                                  Atualizar
-                                </button>
-                                <button 
-                                  className="text-rose-500 hover:underline"
-                                  onClick={() => {
-                                    if (confirm("Deseja realmente excluir esta dívida?")) {
-                                      setDebts(prev => prev.filter(d => d.id !== debt.id));
-                                    }
-                                  }}
-                                >
-                                  Excluir
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="py-20 text-center opacity-20">
-                        <AlertCircle className="h-10 w-10 mx-auto text-slate-400 mb-2" />
-                        <p className="font-bold uppercase text-[10px] tracking-widest">Sem dívidas registradas</p>
-                      </div>
-                    )}
-                  </div>
-                </ScrollArea>
               </CardContent>
             </Card>
           </div>
@@ -718,50 +578,5 @@ function AddTransactionDialog({ onAdd }: { onAdd: (data: any) => void }) {
         </form>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function DebtForm({ onAdd }: { onAdd: (data: any) => void }) {
-  const [name, setName] = useState('');
-  const [total, setTotal] = useState('');
-  const [remaining, setRemaining] = useState('');
-  const [due, setDue] = useState('');
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onAdd({
-      name,
-      totalAmount: parseFloat(total),
-      remainingAmount: parseFloat(remaining),
-      dueDate: due
-    });
-    setName('');
-    setTotal('');
-    setRemaining('');
-    setDue('');
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="grid gap-1.5">
-        <Label className="text-[10px] font-bold uppercase text-slate-400 ml-1">Nome da Dívida</Label>
-        <Input placeholder="Ex: Empréstimo, Carro..." required value={name} onChange={e => setName(e.target.value)} className="rounded-xl border-slate-200 h-11" />
-      </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="grid gap-1.5">
-          <Label className="text-[10px] font-bold uppercase text-slate-400 ml-1">Valor Total (R$)</Label>
-          <Input type="number" step="0.01" required value={total} onChange={e => setTotal(e.target.value)} className="rounded-xl border-slate-200 h-11" />
-        </div>
-        <div className="grid gap-1.5">
-          <Label className="text-[10px] font-bold uppercase text-slate-400 ml-1">Saldo Atual (R$)</Label>
-          <Input type="number" step="0.01" required value={remaining} onChange={e => setRemaining(e.target.value)} className="rounded-xl border-slate-200 h-11" />
-        </div>
-      </div>
-      <div className="grid gap-1.5">
-        <Label className="text-[10px] font-bold uppercase text-slate-400 ml-1">Data de Vencimento</Label>
-        <Input type="date" required value={due} onChange={e => setDue(e.target.value)} className="rounded-xl border-slate-200 h-11" />
-      </div>
-      <Button type="submit" className="w-full bg-slate-900 hover:bg-slate-800 h-12 text-sm font-bold uppercase tracking-wider rounded-xl shadow-lg shadow-slate-100">Cadastrar Dívida</Button>
-    </form>
   );
 }

@@ -27,21 +27,6 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "type", "amount", "date", "month"]
-    },
-    "Debt": {
-      "title": "Long-term Debt",
-      "description": "A larger debt to be tracked",
-      "type": "object",
-      "properties": {
-        "userId": { "type": "string" },
-        "name": { "type": "string" },
-        "totalAmount": { "type": "number" },
-        "remainingAmount": { "type": "number" },
-        "dueDate": { "type": "string", "format": "date" },
-        "interestRate": { "type": "number" },
-        "createdAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["userId", "name", "totalAmount", "remainingAmount"]
     }
   },
   "firestore": {
@@ -52,10 +37,6 @@
     "/users/{userId}/transactions/{transactionId}": {
       "schema": "Transaction",
       "description": "Monthly transactions for the user"
-    },
-    "/users/{userId}/debts/{debtId}": {
-      "schema": "Debt",
-      "description": "Large debts for the user"
     }
   }
 }

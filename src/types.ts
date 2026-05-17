@@ -12,17 +12,6 @@ export interface FinanceTransaction {
   createdAt: string;
 }
 
-export interface FinanceDebt {
-  id: string;
-  userId: string;
-  name: string;
-  totalAmount: number;
-  remainingAmount: number;
-  dueDate: string;
-  interestRate?: number;
-  createdAt: string;
-}
-
 export interface UserProfile {
   uid: string;
   email: string;

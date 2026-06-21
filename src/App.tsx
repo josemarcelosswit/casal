@@ -841,23 +841,24 @@ export default function App() {
                             <tr key={t.id} className="group hover:bg-slate-50 transition-colors">
                               <td className="py-3 px-2">
                                 <div className="flex items-center gap-3">
-                                  {/* Clickable Circle Checklist Toggle - Disabled to prevent accidental edits */}
-                                  <div 
-                                    className="flex-shrink-0"
-                                    title={t.paid === false ? "Não Pago" : "Pago"}
+                                  {/* Clickable Circle Checklist Toggle */}
+                                  <button
+                                    onClick={() => handleUpdateTransaction(t.id, { paid: t.paid === false ? true : false })}
+                                    className="flex-shrink-0 focus:outline-none transition-all active:scale-90"
+                                    title={t.paid === false ? "Marcar como Pago" : "Marcar como Não Pago"}
                                   >
                                     {t.paid === false ? (
-                                      <div className="w-5 h-5 rounded-full border-2 border-rose-300 bg-rose-50 flex items-center justify-center text-rose-400">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-rose-300" />
+                                      <div className="w-5 h-5 rounded-full border-2 border-rose-300 bg-rose-50 hover:bg-color-100 flex items-center justify-center text-rose-400 cursor-pointer transition-colors">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-rose-300 animate-pulse" />
                                       </div>
                                     ) : (
-                                      <div className="w-5 h-5 rounded-full border-2 border-emerald-500 bg-emerald-500 text-white flex items-center justify-center">
+                                      <div className="w-5 h-5 rounded-full border-2 border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600 flex items-center justify-center cursor-pointer transition-colors">
                                         <svg className="w-3.5 h-3.5 stroke-[3]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                                         </svg>
                                       </div>
                                     )}
-                                  </div>
+                                  </button>
 
                                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${t.type === 'income' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-600'}`}>
                                     {t.type === 'income' ? <Plus className="h-4 w-4" /> : <div className="w-1.5 h-1.5 rounded-full bg-current" />}
@@ -1055,12 +1056,12 @@ function AddTransactionDialog({ onAdd }: { onAdd: (data: any) => void }) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button className="bg-blue-600 hover:bg-blue-700 shadow-sm gap-2" />}>
+      <DialogTrigger render={<Button className="bg-blue-600 hover:bg-blue-700 shadow-sm gap-2 rounded-lg" />}>
         <Plus className="h-4 w-4" /> Novo Lançamento
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px] rounded-2xl border-none shadow-2xl">
-        <DialogHeader>
-          <DialogTitle className="font-heading text-xl">Adicionar Transação</DialogTitle>
+      <DialogContent className="sm:max-w-[480px] max-w-[95%] rounded-lg border border-slate-200 shadow-2xl p-5 bg-white">
+        <DialogHeader className="pb-2 border-b border-slate-100">
+          <DialogTitle className="font-heading text-lg font-bold text-slate-800">Nova Transação</DialogTitle>
         </DialogHeader>
         <TransactionForm 
           onSave={(data) => {
@@ -1087,9 +1088,9 @@ function EditTransactionDialog({ transaction, onUpdate }: { transaction: Finance
       }>
         <Pencil className="h-4 w-4" />
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px] rounded-2xl border-none shadow-2xl">
-        <DialogHeader>
-          <DialogTitle className="font-heading text-xl">Editar Transação</DialogTitle>
+      <DialogContent className="sm:max-w-[480px] max-w-[95%] rounded-lg border border-slate-200 shadow-2xl p-5 bg-white">
+        <DialogHeader className="pb-2 border-b border-slate-100">
+          <DialogTitle className="font-heading text-lg font-bold text-slate-800">Editar Transação</DialogTitle>
         </DialogHeader>
         <TransactionForm 
           initialData={transaction}
@@ -1108,7 +1109,7 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
   const [amount, setAmount] = useState(initialData?.amount.toString() || '');
   const [description, setDescription] = useState(initialData?.description || '');
   const [date, setDate] = useState(initialData ? format(safeParseDate(initialData.date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'));
-  const [paid, setPaid] = useState<boolean>(initialData ? initialData.paid !== false : true);
+  const [paid, setPaid] = useState<boolean>(initialData ? initialData.paid !== false : false);
   const [periodicity, setPeriodicity] = useState<'monthly' | 'yearly'>(initialData?.periodicity || 'monthly');
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringMonths, setRecurringMonths] = useState('1');
@@ -1118,7 +1119,7 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
     if (!initialData) {
       setAmount('');
       setDescription('');
-      setPaid(true);
+      setPaid(false);
       setPeriodicity('monthly');
       setIsRecurring(false);
       setRecurringMonths('1');
@@ -1130,7 +1131,6 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
     e.preventDefault();
     
     // Improved number parsing for Brazilian format (handle comma as decimal)
-    // If input type is "number", value is always dot-separated strings, but we handle just in case or for text inputs
     const cleanAmount = amount.replace(',', '.');
     const parsedAmount = parseFloat(cleanAmount);
     
@@ -1172,27 +1172,52 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 mt-4">
-      <div className="flex bg-slate-100 p-1 rounded-xl shadow-inner border border-slate-200">
+    <form onSubmit={handleSubmit} className="space-y-4 mt-4 text-slate-700">
+      {/* Type Selector (Tab bar) - Sleek & Square */}
+      <div className="flex bg-slate-100 p-1 rounded-md border border-slate-250 shadow-inner">
         <button
           type="button"
-          className={`flex-1 py-2 text-xs font-bold uppercase tracking-tight rounded-lg transition-all ${type === 'income' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400'}`}
+          className={`flex-1 py-1.5 text-xs font-bold uppercase tracking-wider rounded-md transition-all cursor-pointer ${
+            type === 'income' 
+              ? 'bg-emerald-600 text-white shadow-sm font-black' 
+              : 'text-slate-500 hover:text-slate-700'
+          }`}
           onClick={() => setType('income')}
         >
           Receita
         </button>
         <button
           type="button"
-          className={`flex-1 py-2 text-xs font-bold uppercase tracking-tight rounded-lg transition-all ${type === 'expense' ? 'bg-white text-rose-600 shadow-sm' : 'text-slate-400'}`}
+          className={`flex-1 py-1.5 text-xs font-bold uppercase tracking-wider rounded-md transition-all cursor-pointer ${
+            type === 'expense' 
+              ? 'bg-rose-600 text-white shadow-sm font-black' 
+              : 'text-slate-500 hover:text-slate-700'
+          }`}
           onClick={() => setType('expense')}
         >
           Despesa
         </button>
       </div>
 
-      <div className="space-y-4">
-        <div className="grid gap-1.5">
-          <Label htmlFor="amount" className="text-[10px] font-bold uppercase text-slate-400 ml-1">Valor (R$)</Label>
+      {/* Grid Layout - 2 columns on small/medium blocks */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+        
+        {/* Descrição - Full span */}
+        <div className="grid gap-1.5 sm:col-span-2">
+          <Label htmlFor="description" className="text-[10px] font-bold uppercase text-slate-400 ml-0.5">Descrição</Label>
+          <Input 
+            id="description" 
+            placeholder="Ex: Aluguel, Supermercado, Salário..." 
+            required
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            className="rounded-md border-slate-200 h-10 focus-visible:ring-slate-400 focus-visible:border-slate-400"
+          />
+        </div>
+
+        {/* Valor */}
+        <div className="grid gap-1.5 col-span-1">
+          <Label htmlFor="amount" className="text-[10px] font-bold uppercase text-slate-400 ml-0.5">Valor (R$)</Label>
           <Input 
             id="amount" 
             type="text" 
@@ -1201,193 +1226,202 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
             required 
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            className="rounded-xl border-slate-200 h-11"
+            className="rounded-md border-slate-200 h-10 tracking-wide font-medium focus-visible:ring-slate-400 focus-visible:border-slate-400"
           />
         </div>
 
-        <div className="grid gap-1.5">
-          <Label htmlFor="description" className="text-[10px] font-bold uppercase text-slate-400 ml-1">Descrição</Label>
+        {/* Data */}
+        <div className="grid gap-1.5 col-span-1">
+          <Label htmlFor="date" className="text-[10px] font-bold uppercase text-slate-400 ml-0.5">Data</Label>
           <Input 
-            id="description" 
-            placeholder="Ex: Aluguel, Supermercado..." 
+            id="date" 
+            type="date" 
             required
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            className="rounded-xl border-slate-200 h-11"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="rounded-md border-slate-200 h-10 focus-visible:ring-slate-400 focus-visible:border-slate-400"
           />
         </div>
+      </div>
 
-        <div className="grid gap-4">
-          <div className="grid gap-1.5">
-            <Label htmlFor="date" className="text-[10px] font-bold uppercase text-slate-400 ml-1">Data</Label>
-            <Input 
-              id="date" 
-              type="date" 
-              required
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="rounded-xl border-slate-200 h-11"
-            />
-          </div>
-        </div>
-
-        {/* Periodicidade Selector */}
-        <div className="grid gap-1.5">
-          <Label className="text-[10px] font-bold uppercase text-slate-400 ml-1">Frequência / Periodicidade</Label>
-          <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
-            <button
-              type="button"
-              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                periodicity === 'monthly' 
-                  ? 'bg-white text-slate-800 shadow-xs font-bold' 
-                  : 'text-slate-400 hover:text-slate-600'
-              }`}
-              onClick={() => setPeriodicity('monthly')}
-            >
-              {type === 'income' ? 'Mensal (Salário, Proventos)' : 'Mensal (Gasto de Rotina)'}
-            </button>
-            <button
-              type="button"
-              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                periodicity === 'yearly' 
-                  ? 'bg-white text-slate-800 shadow-xs font-bold' 
-                  : 'text-slate-400 hover:text-slate-600'
-              }`}
-              onClick={() => setPeriodicity('yearly')}
-            >
-              {type === 'income' ? 'Anual (Bônus, 13º)' : 'Anual (IPVA, Seguros)'}
-            </button>
-          </div>
-        </div>
-
-        {/* Premium Status Toggle Switch - Disabled as requested */}
-        <div className="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-150 rounded-xl opacity-60">
-          <div className="flex flex-col">
-            <span className="text-xs font-bold text-slate-700">
-              {type === 'income' ? 'Valor já recebido?' : 'Valor já pago?'}
-            </span>
-            <span className="text-[10px] text-slate-400 font-medium">
-              {type === 'income' 
-                ? 'Indica se esta receita já foi recebida' 
-                : 'Indica se esta despesa já foi paga'}
-            </span>
-          </div>
+      {/* Periodicidade Selector - Sleek and Compact */}
+      <div className="grid gap-1.5">
+        <Label className="text-[10px] font-bold uppercase text-slate-400 ml-0.5">Frequência</Label>
+        <div className="flex bg-slate-50 p-1 rounded-md border border-slate-200">
           <button
             type="button"
-            disabled
-            className={`w-12 h-7 rounded-full transition-colors relative p-1 duration-200 cursor-not-allowed ${
-              paid ? 'bg-emerald-500' : 'bg-slate-300'
+            className={`flex-1 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+              periodicity === 'monthly' 
+                ? 'bg-white text-slate-800 shadow-sm border border-slate-200' 
+                : 'text-slate-400 hover:text-slate-600'
             }`}
+            onClick={() => setPeriodicity('monthly')}
           >
-            <div
-              className={`w-5 h-5 bg-white rounded-full shadow-sm flex items-center justify-center transition-transform duration-200 transform ${
-                paid ? 'translate-x-[20px]' : 'translate-x-0'
-              }`}
-            >
-              {paid ? (
-                <svg className="w-3.5 h-3.5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                </svg>
-              ) : (
-                <div className="w-1.5 h-1.5 rounded-full bg-slate-400" />
-              )}
-            </div>
+            {type === 'income' ? 'Mensal (Disponível sempre)' : 'Mensal (Fatura, Mensalidade)'}
+          </button>
+          <button
+            type="button"
+            className={`flex-1 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+              periodicity === 'yearly' 
+                ? 'bg-white text-slate-800 shadow-sm border border-slate-200' 
+                : 'text-slate-400 hover:text-slate-600'
+            }`}
+            onClick={() => setPeriodicity('yearly')}
+          >
+            {type === 'income' ? 'Anual (Anuidade, Bônus)' : 'Anual (IPVA, IPTU)'}
           </button>
         </div>
+      </div>
 
-        {!initialData && (
-          <div className="space-y-4 pt-2 border-t border-slate-100">
-            <div className="flex items-center justify-between pt-1">
-              <div className="flex items-center space-x-3 ml-1 cursor-pointer group">
-                <input 
-                  type="checkbox" 
-                  id="recurring" 
-                  checked={isRecurring}
-                  onChange={(e) => setIsRecurring(e.target.checked)}
-                  className="w-4 h-4 rounded-md border-slate-300 text-blue-600 focus:ring-blue-600 transition-colors cursor-pointer"
-                />
-                <Label htmlFor="recurring" className="text-xs font-semibold text-slate-600 cursor-pointer group-hover:text-slate-900 transition-colors">
-                  Repetir ou parcelar em vários meses?
-                </Label>
+      {/* Payment and Options Split Layout - Highly compact and neat */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+        
+        {/* Toggle pago/recebido in a square compact card */}
+        <button
+          type="button"
+          onClick={() => setPaid(!paid)}
+          className={`flex items-center justify-between p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
+            paid 
+              ? 'bg-emerald-50/50 border-emerald-200 text-emerald-900 shadow-xs' 
+              : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
+          }`}
+        >
+          <div className="flex flex-col pr-1">
+            <span className="text-xs font-bold">
+              {type === 'income' ? 'Pago/Recebido?' : 'Valor Pago?'}
+            </span>
+            <span className="text-[9px] text-slate-400 font-medium">
+              {paid ? 'Sim, confirmado!' : 'Aguardando pendência'}
+            </span>
+          </div>
+          <div className="flex items-center shrink-0">
+            {paid ? (
+              <div className="w-5 h-5 bg-emerald-600 text-white rounded-md flex items-center justify-center shadow-xs">
+                <Check className="w-3.5 h-3.5 stroke-[3]" />
               </div>
-              
-              {isRecurring && (
-                <div className="flex items-center gap-2">
-                  <Label className="text-[10px] font-bold uppercase text-slate-400">Meses:</Label>
-                  <Input 
-                    type="number" 
-                    min="2" 
-                    max="48"
-                    value={recurringMonths}
-                    onChange={(e) => setRecurringMonths(e.target.value)}
-                    className="w-16 h-8 text-xs rounded-lg text-center"
-                  />
-                </div>
-              )}
-            </div>
-
-            {isRecurring && (
-              <div className="space-y-3 bg-slate-50 p-3 rounded-xl border border-slate-150">
-                <Label className="text-[10px] font-bold uppercase text-slate-400">Modo de Distribuição:</Label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setRecurringType('split')}
-                    className={`p-2.5 text-left rounded-lg border text-xs flex flex-col gap-0.5 cursor-pointer transition-all ${
-                      recurringType === 'split'
-                        ? 'bg-white border-blue-500 ring-2 ring-blue-100 text-slate-800 font-bold'
-                        : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
-                    }`}
-                  >
-                    <span>Dividir em parcelas</span>
-                    <span className="text-[9px] font-normal text-slate-400">Dividir o valor total nos meses</span>
-                  </button>
-                  
-                  <button
-                    type="button"
-                    onClick={() => setRecurringType('replicate')}
-                    className={`p-2.5 text-left rounded-lg border text-xs flex flex-col gap-0.5 cursor-pointer transition-all ${
-                      recurringType === 'replicate'
-                        ? 'bg-white border-blue-500 ring-2 ring-blue-100 text-slate-800 font-bold'
-                        : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
-                    }`}
-                  >
-                    <span>Repetir fixo mensal</span>
-                    <span className="text-[9px] font-normal text-slate-400">Lançar valor cheio por mês</span>
-                  </button>
-                </div>
-
-                {/* Resumo do cálculo */}
-                {(() => {
-                  const monthsVal = parseInt(recurringMonths) || 1;
-                  const amtVal = parseFloat(amount.replace(',', '.')) || 0;
-                  if (monthsVal > 1 && amtVal > 0) {
-                    if (recurringType === 'split') {
-                      const perMonth = Math.round((amtVal / monthsVal) * 105) / 105; // temporary calculation or clean average
-                      const perMonthReal = Math.round((amtVal / monthsVal) * 100) / 100;
-                      return (
-                        <div className="text-[10px] font-semibold text-blue-600 bg-blue-50/50 p-2 rounded-lg border border-blue-100">
-                          💳 Compra parcelada: Serão criados {monthsVal} lançamentos de <strong className="font-extrabold text-[11px]">R$ {perMonthReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> por mês (Total R$ {amtVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).
-                        </div>
-                      );
-                    } else {
-                      return (
-                        <div className="text-[10px] font-semibold text-slate-600 bg-slate-100/50 p-2 rounded-lg border border-slate-200">
-                          🔄 Repetição: Serão criados {monthsVal} lançamentos mensais de <strong className="font-extrabold text-[11px]">R$ {amtVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong> cada (Total R$ {(amtVal * monthsVal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).
-                        </div>
-                      );
-                    }
-                  }
-                  return null;
-                })()}
+            ) : (
+              <div className="w-5 h-5 bg-white border border-slate-300 rounded-md flex items-center justify-center shadow-inner">
+                <div className="w-1.5 h-1.5 rounded-xs bg-slate-300" />
               </div>
             )}
           </div>
+        </button>
+
+        {/* Recurring Switch in a neat, interactive card */}
+        {!initialData && (
+          <button
+            type="button"
+            onClick={() => setIsRecurring(!isRecurring)}
+            className={`flex items-center justify-between p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
+              isRecurring 
+                ? 'bg-blue-5/50 border-blue-200 text-blue-900 shadow-xs' 
+                : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
+            }`}
+          >
+            <div className="flex flex-col pr-1">
+              <span className="text-xs font-bold">Dividir em meses?</span>
+              <span className="text-[9px] text-slate-400 font-medium">
+                {isRecurring ? 'Ativo' : 'Apenas uma vez'}
+              </span>
+            </div>
+            <div className="flex items-center shrink-0">
+              {isRecurring ? (
+                <div className="w-5 h-5 bg-blue-600 text-white rounded-md flex items-center justify-center shadow-xs">
+                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                </div>
+              ) : (
+                <div className="w-5 h-5 bg-white border border-slate-300 rounded-md flex items-center justify-center shadow-inner">
+                  <div className="w-1.5 h-1.5 rounded-xs bg-slate-300" />
+                </div>
+              )}
+            </div>
+          </button>
         )}
       </div>
 
-      <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 h-12 text-sm font-bold uppercase tracking-wider rounded-xl shadow-lg shadow-blue-100 mt-2">
-        {initialData ? 'Atualizar Transação' : 'Salvar Transação'}
+      {/* Recurrence Settings area - Animated & Compact */}
+      {!initialData && isRecurring && (
+        <motion.div 
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          className="space-y-3 bg-slate-50 p-3 rounded-lg border border-slate-200 mt-2 overflow-hidden"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-700">Quantidade de Meses</span>
+            <div className="flex items-center gap-1">
+              <Input 
+                type="number" 
+                min="2" 
+                max="48"
+                value={recurringMonths}
+                onChange={(e) => setRecurringMonths(e.target.value)}
+                className="w-16 h-8 text-xs rounded-md text-center border-slate-200 focus-visible:ring-slate-400"
+              />
+              <span className="text-xs text-slate-400 font-semibold">meses</span>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-[9px] font-bold uppercase text-slate-400">Distribuição do Lançamento</Label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setRecurringType('split')}
+                className={`p-2 text-left rounded-md border text-xs flex flex-col gap-0.5 cursor-pointer transition-all ${
+                  recurringType === 'split'
+                    ? 'bg-white border-blue-500 ring-2 ring-blue-50 text-slate-800 font-bold'
+                    : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                }`}
+              >
+                <span>Dividir valor</span>
+                <span className="text-[8px] font-normal text-slate-400">Divide {amount || '0,00'} em {recurringMonths}x</span>
+              </button>
+              
+              <button
+                type="button"
+                onClick={() => setRecurringType('replicate')}
+                className={`p-2 text-left rounded-md border text-xs flex flex-col gap-0.5 cursor-pointer transition-all ${
+                  recurringType === 'replicate'
+                    ? 'bg-white border-blue-500 ring-2 ring-blue-50 text-slate-800 font-bold'
+                    : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                }`}
+              >
+                <span>Valor mensal fixo</span>
+                <span className="text-[8px] font-normal text-slate-400">Repete {amount || '0,00'} todo mês</span>
+              </button>
+            </div>
+          </div>
+
+          {(() => {
+            const monthsVal = parseInt(recurringMonths) || 1;
+            const amtVal = parseFloat(amount.replace(',', '.')) || 0;
+            if (monthsVal > 1 && amtVal > 0) {
+              if (recurringType === 'split') {
+                const perMonthReal = Math.round((amtVal / monthsVal) * 100) / 100;
+                return (
+                  <div className="text-[9px] font-semibold text-blue-600 bg-blue-50/50 p-2 rounded-md border border-blue-100 flex items-center gap-1">
+                    <span>💳 {monthsVal} lançamentos de <strong>R$ {perMonthReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> por mês.</span>
+                  </div>
+                );
+              } else {
+                return (
+                  <div className="text-[9px] font-semibold text-slate-600 bg-slate-100/50 p-2 rounded-md border border-slate-200 flex items-center gap-1">
+                    <span>🔄 {monthsVal} lançamentos recorrentes de <strong>R$ {amtVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>.</span>
+                  </div>
+                );
+              }
+            }
+            return null;
+          })()}
+        </motion.div>
+      )}
+
+      {/* Submit Button - Crisp and robust */}
+      <Button 
+        type="submit" 
+        className="w-full bg-blue-600 hover:bg-blue-700 h-11 text-xs font-bold uppercase tracking-wider rounded-lg shadow-md hover:shadow-lg transition-all mt-4"
+      >
+        {initialData ? 'Atualizar Lançamento' : 'Confirmar Lançamento'}
       </Button>
     </form>
   );

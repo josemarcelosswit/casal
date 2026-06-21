@@ -12,6 +12,7 @@ export interface FinanceTransaction {
   createdAt: string;
   paid?: boolean;
   periodicity?: 'monthly' | 'yearly';
+  recurrenceId?: string;
 }
 
 export interface UserProfile {

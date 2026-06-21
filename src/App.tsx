@@ -59,6 +59,30 @@ function safeParseDate(dateVal: any): Date {
   return new Date();
 }
 
+function getRelatedTransactions(target: FinanceTransaction, allTransactions: FinanceTransaction[]): FinanceTransaction[] {
+  if (!target) return [];
+  if (target.recurrenceId) {
+    return allTransactions.filter(t => t.recurrenceId === target.recurrenceId);
+  }
+  
+  // Custom helper to clean descriptions like "(1/12)" or "(Mês 1/12)" to group old elements
+  const cleanDesc = (desc: string): string => {
+    return desc.replace(/\s*\(\d+\/\d+\)$/, '').replace(/\s*\(Mês\s*\d+\/\d+\)$/, '').trim();
+  };
+  
+  const targetClean = cleanDesc(target.description);
+  
+  if (targetClean !== target.description.trim()) {
+    return allTransactions.filter(t => {
+      return t.type === target.type && 
+             t.amount === target.amount && 
+             cleanDesc(t.description) === targetClean;
+    });
+  }
+  
+  return [target];
+}
+
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -92,6 +116,9 @@ export default function App() {
     setCurrentMonth(parsed);
   };
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [transactionToDelete, setTransactionToDelete] = useState<FinanceTransaction | null>(null);
+  const [relatedTransactions, setRelatedTransactions] = useState<FinanceTransaction[]>([]);
   const [periodicityFilter, setPeriodicityFilter] = useState<'all' | 'monthly' | 'yearly'>('all');
 
   // Authentication & Cloud Sync states
@@ -299,6 +326,7 @@ export default function App() {
       month: format(trxDate, 'yyyy-MM'),
       paid: data.paid !== undefined ? data.paid : true,
       periodicity: data.periodicity || 'monthly',
+      recurrenceId: data.recurrenceId || undefined,
       createdAt: new Date().toISOString()
     };
 
@@ -323,6 +351,48 @@ export default function App() {
     } else {
       setTransactions(prev => prev.filter(t => t.id !== id));
     }
+  };
+
+  const onInitiateDelete = (t: FinanceTransaction) => {
+    const related = getRelatedTransactions(t, transactions);
+    if (related.length > 1) {
+      setTransactionToDelete(t);
+      setRelatedTransactions(related);
+      setDeleteConfirmOpen(true);
+    } else {
+      handleDeleteTransaction(t.id);
+    }
+  };
+
+  const confirmDeleteSingle = async () => {
+    if (!transactionToDelete) return;
+    await handleDeleteTransaction(transactionToDelete.id);
+    setDeleteConfirmOpen(false);
+    setTransactionToDelete(null);
+    setRelatedTransactions([]);
+  };
+
+  const confirmDeleteAll = async () => {
+    if (!transactionToDelete || relatedTransactions.length === 0) return;
+    
+    if (user) {
+      try {
+        const batch = writeBatch(db);
+        relatedTransactions.forEach(t => {
+          batch.delete(doc(db, 'users', user.uid, 'transactions', t.id));
+        });
+        await batch.commit();
+      } catch (err) {
+        console.error("Error deleting all transactions from Firestore:", err);
+      }
+    } else {
+      const idsToDelete = new Set(relatedTransactions.map(t => t.id));
+      setTransactions(prev => prev.filter(t => !idsToDelete.has(t.id)));
+    }
+    
+    setDeleteConfirmOpen(false);
+    setTransactionToDelete(null);
+    setRelatedTransactions([]);
   };
 
   const handleUpdateTransaction = async (id: string, data: Partial<FinanceTransaction>) => {
@@ -706,6 +776,60 @@ export default function App() {
             </DialogContent>
           </Dialog>
         )}
+
+        {/* Modal de Confirmação de Exclusão de Lançamento Recorrente */}
+        <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+          <DialogContent className="sm:max-w-[440px] max-w-[95%] rounded-lg border border-slate-200 shadow-2xl p-5 bg-white">
+            <DialogHeader className="pb-2 border-b border-slate-100">
+              <DialogTitle className="font-heading text-lg font-bold text-slate-800 flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-amber-500" />
+                Excluir Lançamento Recorrente
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-3 text-slate-600 text-sm">
+              <p>
+                Este lançamento <strong className="text-slate-900 font-bold">"{transactionToDelete?.description}"</strong> faz parte de um grupo recorrente de transações.
+              </p>
+              <div className="bg-slate-50 border border-slate-150 rounded-md p-3 text-xs text-slate-500 space-y-1.5 font-sans">
+                <span className="font-bold text-slate-700 flex items-center gap-1">📌 Informações do Grupo:</span>
+                <p>• Total de parcelas encontradas no sistema: <strong className="text-slate-800 font-extrabold">{relatedTransactions.length} meses/lançamentos</strong>.</p>
+                <p>• Valor de cada lançamento: <strong className="text-slate-800 font-extrabold">R$ {transactionToDelete?.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>.</p>
+              </div>
+              <p className="text-xs text-slate-400">
+                Escolha a opção desejada. Nenhuma das opções irá apagar dados de outros grupos ou transações não relacionadas.
+              </p>
+            </div>
+            
+            <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
+              <Button 
+                type="button"
+                onClick={confirmDeleteSingle}
+                className="w-full bg-slate-100 text-slate-700 hover:bg-rose-50 hover:text-rose-600 border border-slate-200 hover:border-rose-200 font-bold uppercase tracking-wider text-xs py-2.5 rounded-md transition-all cursor-pointer"
+              >
+                Excluir Apenas Este Mês
+              </Button>
+              <Button 
+                type="button"
+                onClick={confirmDeleteAll}
+                className="w-full bg-rose-600 text-white hover:bg-rose-700 font-bold uppercase tracking-wider text-xs py-2.5 rounded-md shadow-md transition-all cursor-pointer"
+              >
+                Excluir de Todos os Meses ({relatedTransactions.length} parcelas)
+              </Button>
+              <Button 
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setDeleteConfirmOpen(false);
+                  setTransactionToDelete(null);
+                  setRelatedTransactions([]);
+                }}
+                className="w-full text-slate-400 hover:text-slate-600 font-bold uppercase tracking-wider text-[10px] h-9 rounded-md cursor-pointer"
+              >
+                Cancelar Exclusão
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </header>
 
       <main className="flex-1 max-w-7xl mx-auto w-full p-6 space-y-6">
@@ -898,7 +1022,7 @@ export default function App() {
                                   <Button 
                                     variant="ghost" 
                                     size="icon" 
-                                    onClick={() => handleDeleteTransaction(t.id)}
+                                    onClick={() => onInitiateDelete(t)}
                                     className="h-8 w-8 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg"
                                   >
                                     <Trash2 className="h-4 w-4" />
@@ -1139,6 +1263,7 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
     if (!initialData && isRecurring && parseInt(recurringMonths) > 1) {
       const baseDate = new Date(date + 'T12:00:00');
       const monthsCount = parseInt(recurringMonths);
+      const recurrenceId = 'group_' + Math.random().toString(36).substr(2, 9);
       
       const installmentAmount = recurringType === 'split'
         ? Math.round((parsedAmount / monthsCount) * 100) / 100
@@ -1154,7 +1279,8 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
             : `${description} (Mês ${i + 1}/${monthsCount})`,
           date: nextDate.toISOString(),
           paid: paid,
-          periodicity: periodicity
+          periodicity: periodicity,
+          recurrenceId: recurrenceId
         });
       }
     } else {

@@ -659,6 +659,7 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
   const [periodicity, setPeriodicity] = useState<'monthly' | 'yearly'>(initialData?.periodicity || 'monthly');
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringMonths, setRecurringMonths] = useState('1');
+  const [recurringType, setRecurringType] = useState<'split' | 'replicate'>('split');
 
   const reset = () => {
     if (!initialData) {
@@ -668,6 +669,7 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
       setPeriodicity('monthly');
       setIsRecurring(false);
       setRecurringMonths('1');
+      setRecurringType('split');
     }
   };
 
@@ -683,12 +685,20 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
 
     if (!initialData && isRecurring && parseInt(recurringMonths) > 1) {
       const baseDate = new Date(date + 'T12:00:00');
-      for (let i = 0; i < parseInt(recurringMonths); i++) {
+      const monthsCount = parseInt(recurringMonths);
+      
+      const installmentAmount = recurringType === 'split'
+        ? Math.round((parsedAmount / monthsCount) * 100) / 100
+        : parsedAmount;
+
+      for (let i = 0; i < monthsCount; i++) {
         const nextDate = addMonths(baseDate, i);
         onSave({
           type,
-          amount: parsedAmount,
-          description: `${description} (${i + 1}/${recurringMonths})`,
+          amount: installmentAmount,
+          description: recurringType === 'split' 
+            ? `${description} (${i + 1}/${monthsCount})` 
+            : `${description} (Mês ${i + 1}/${monthsCount})`,
           date: nextDate.toISOString(),
           paid: paid,
           periodicity: periodicity
@@ -833,18 +843,18 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
         </div>
 
         {!initialData && (
-          <div className="space-y-3 pt-2">
-            <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+          <div className="space-y-4 pt-2 border-t border-slate-100">
+            <div className="flex items-center justify-between pt-1">
               <div className="flex items-center space-x-3 ml-1 cursor-pointer group">
                 <input 
                   type="checkbox" 
                   id="recurring" 
                   checked={isRecurring}
                   onChange={(e) => setIsRecurring(e.target.checked)}
-                  className="w-4 h-4 rounded-md border-slate-300 text-blue-600 focus:ring-blue-600 transition-colors"
+                  className="w-4 h-4 rounded-md border-slate-300 text-blue-600 focus:ring-blue-600 transition-colors cursor-pointer"
                 />
                 <Label htmlFor="recurring" className="text-xs font-semibold text-slate-600 cursor-pointer group-hover:text-slate-900 transition-colors">
-                  Repetir mensalmente?
+                  Repetir ou parcelar em vários meses?
                 </Label>
               </div>
               
@@ -862,6 +872,63 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
                 </div>
               )}
             </div>
+
+            {isRecurring && (
+              <div className="space-y-3 bg-slate-50 p-3 rounded-xl border border-slate-150">
+                <Label className="text-[10px] font-bold uppercase text-slate-400">Modo de Distribuição:</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRecurringType('split')}
+                    className={`p-2.5 text-left rounded-lg border text-xs flex flex-col gap-0.5 cursor-pointer transition-all ${
+                      recurringType === 'split'
+                        ? 'bg-white border-blue-500 ring-2 ring-blue-100 text-slate-800 font-bold'
+                        : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                    }`}
+                  >
+                    <span>Dividir em parcelas</span>
+                    <span className="text-[9px] font-normal text-slate-400">Dividir o valor total nos meses</span>
+                  </button>
+                  
+                  <button
+                    type="button"
+                    onClick={() => setRecurringType('replicate')}
+                    className={`p-2.5 text-left rounded-lg border text-xs flex flex-col gap-0.5 cursor-pointer transition-all ${
+                      recurringType === 'replicate'
+                        ? 'bg-white border-blue-500 ring-2 ring-blue-100 text-slate-800 font-bold'
+                        : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                    }`}
+                  >
+                    <span>Repetir fixo mensal</span>
+                    <span className="text-[9px] font-normal text-slate-400">Lançar valor cheio por mês</span>
+                  </button>
+                </div>
+
+                {/* Resumo do cálculo */}
+                {(() => {
+                  const monthsVal = parseInt(recurringMonths) || 1;
+                  const amtVal = parseFloat(amount.replace(',', '.')) || 0;
+                  if (monthsVal > 1 && amtVal > 0) {
+                    if (recurringType === 'split') {
+                      const perMonth = Math.round((amtVal / monthsVal) * 105) / 105; // temporary calculation or clean average
+                      const perMonthReal = Math.round((amtVal / monthsVal) * 100) / 100;
+                      return (
+                        <div className="text-[10px] font-semibold text-blue-600 bg-blue-50/50 p-2 rounded-lg border border-blue-100">
+                          💳 Compra parcelada: Serão criados {monthsVal} lançamentos de <strong className="font-extrabold text-[11px]">R$ {perMonthReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> por mês (Total R$ {amtVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).
+                        </div>
+                      );
+                    } else {
+                      return (
+                        <div className="text-[10px] font-semibold text-slate-600 bg-slate-100/50 p-2 rounded-lg border border-slate-200">
+                          🔄 Repetição: Serão criados {monthsVal} lançamentos mensais de <strong className="font-extrabold text-[11px]">R$ {amtVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong> cada (Total R$ {(amtVal * monthsVal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).
+                        </div>
+                      );
+                    }
+                  }
+                  return null;
+                })()}
+              </div>
+            )}
           </div>
         )}
       </div>

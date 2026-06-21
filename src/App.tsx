@@ -55,8 +55,16 @@ export default function App() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [submittingAuth, setSubmittingAuth] = useState(false);
   
+  const [isIframe, setIsIframe] = useState(false);
+
   // Authenticated state & Real-time Sync
   useEffect(() => {
+    try {
+      setIsIframe(window.self !== window.top);
+    } catch (e) {
+      setIsIframe(true);
+    }
+
     // Sync current month state from LocalStorage on mount
     const savedMonth = localStorage.getItem('financas_cadal_month');
     if (savedMonth) {
@@ -495,11 +503,44 @@ export default function App() {
 
                 {/* Direct Help Banner for specific credentials */}
                 <div className="bg-blue-50/80 p-3 rounded-xl border border-blue-100 text-xs text-blue-700 space-y-1">
-                  <span className="font-bold flex items-center gap-1">🔑 Acesso Prontinho:</span>
-                  <p className="text-[11px] leading-relaxed text-blue-600">
-                    Digite o usuário <strong className="font-extrabold bg-white px-1.5 py-0.5 rounded border border-blue-200 text-blue-700">cerveja</strong> e a senha <strong className="font-extrabold bg-white px-1.5 py-0.5 rounded border border-blue-200 text-blue-700">1411</strong> abaixo para abrir sua conta sincronizada!
+                  <span className="font-bold flex items-center gap-1">🔑 Acesso Sincronizado:</span>
+                  <p className="text-[11px] leading-relaxed text-blue-600 font-medium">
+                    Digite o usuário <strong className="font-extrabold bg-white px-1.5 py-0.5 rounded border border-blue-200 text-blue-700">cerveja</strong> e a sua senha cadastrada no campo correspondente!
                   </p>
                 </div>
+
+                {isIframe && (
+                  <div className="bg-amber-50/90 border border-amber-150 p-3 rounded-xl text-[11px] text-amber-800 space-y-2 leading-relaxed">
+                    <span className="font-extrabold flex items-center gap-1 text-amber-900">💡 Dica Importante para Celular:</span>
+                    <p>
+                      Para não precisar logar de novo ao atualizar a página no celular, use o link direto do app fora do chat:
+                    </p>
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" 
+                        readOnly 
+                        value={window.location.href} 
+                        className="bg-white border border-amber-200 rounded px-2 py-1 text-[10px] select-all font-mono flex-1 text-slate-700"
+                        id="direct-app-link"
+                      />
+                      <Button 
+                        type="button"
+                        size="sm" 
+                        className="h-7 text-[10px] bg-amber-650 hover:bg-amber-700 text-white font-bold px-2 rounded cursor-pointer"
+                        onClick={() => {
+                          const el = document.getElementById('direct-app-link') as HTMLInputElement;
+                          if (el) {
+                            el.select();
+                            navigator.clipboard.writeText(el.value);
+                            alert('Link copiado! Abra no Safari ou Chrome do celular.');
+                          }
+                        }}
+                      >
+                        Copiar
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 <form onSubmit={handleEmailAuth} className="space-y-4">
                   <div className="space-y-1.5">
@@ -522,7 +563,7 @@ export default function App() {
                       type="password"
                       value={authPassword}
                       onChange={(e) => setAuthPassword(e.target.value)}
-                      placeholder="Ex: 1411"
+                      placeholder="Sua senha secreta"
                       className="rounded-xl border-slate-250 focus-visible:ring-blue-500/25 focus-visible:border-blue-500"
                       required
                     />
@@ -1069,10 +1110,10 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
           <Label htmlFor="amount" className="text-[10px] font-bold uppercase text-slate-400 ml-1">Valor (R$)</Label>
           <Input 
             id="amount" 
-            type="number" 
+            type="text" 
+            inputMode="decimal"
             placeholder="0,00" 
             required 
-            step="0.01"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             className="rounded-xl border-slate-200 h-11"

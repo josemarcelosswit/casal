@@ -62,21 +62,25 @@ function safeParseDate(dateVal: any): Date {
 function getRelatedTransactions(target: FinanceTransaction, allTransactions: FinanceTransaction[]): FinanceTransaction[] {
   if (!target) return [];
   if (target.recurrenceId) {
-    return allTransactions.filter(t => t.recurrenceId === target.recurrenceId);
+    return allTransactions.filter(t => t && t.recurrenceId === target.recurrenceId);
   }
   
   // Custom helper to clean descriptions like "(1/12)" or "(Mês 1/12)" to group old elements
   const cleanDesc = (desc: string): string => {
+    if (!desc) return '';
     return desc.replace(/\s*\(\d+\/\d+\)$/, '').replace(/\s*\(Mês\s*\d+\/\d+\)$/, '').trim();
   };
   
-  const targetClean = cleanDesc(target.description);
+  const targetDesc = target.description || '';
+  const targetClean = cleanDesc(targetDesc);
   
-  if (targetClean !== target.description.trim()) {
+  if (targetClean !== targetDesc.trim()) {
     return allTransactions.filter(t => {
+      if (!t) return false;
+      const tDesc = t.description || '';
       return t.type === target.type && 
              t.amount === target.amount && 
-             cleanDesc(t.description) === targetClean;
+             cleanDesc(tDesc) === targetClean;
     });
   }
   
@@ -342,6 +346,10 @@ export default function App() {
   };
 
   const handleDeleteTransaction = async (id: string) => {
+    if (!id) {
+      console.warn("handleDeleteTransaction called with empty/missing id");
+      return;
+    }
     if (user) {
       try {
         await deleteDoc(doc(db, 'users', user.uid, 'transactions', id));
@@ -349,50 +357,62 @@ export default function App() {
         console.error("Error deleting document from Firestore:", err);
       }
     } else {
-      setTransactions(prev => prev.filter(t => t.id !== id));
+      setTransactions(prev => prev.filter(t => t && t.id && t.id !== id));
     }
   };
 
   const onInitiateDelete = (t: FinanceTransaction) => {
-    const related = getRelatedTransactions(t, transactions);
-    if (related.length > 1) {
-      setTransactionToDelete(t);
-      setRelatedTransactions(related);
-      setDeleteConfirmOpen(true);
-    } else {
-      handleDeleteTransaction(t.id);
+    if (!t) return;
+    try {
+      const related = getRelatedTransactions(t, transactions);
+      if (related && related.length > 1) {
+        setTransactionToDelete(t);
+        setRelatedTransactions(related);
+        setDeleteConfirmOpen(true);
+      } else {
+        handleDeleteTransaction(t.id);
+      }
+    } catch (err) {
+      console.error("Error initiating transaction delete:", err);
     }
   };
 
   const confirmDeleteSingle = async () => {
     if (!transactionToDelete) return;
-    await handleDeleteTransaction(transactionToDelete.id);
-    setDeleteConfirmOpen(false);
-    setTransactionToDelete(null);
-    setRelatedTransactions([]);
+    try {
+      await handleDeleteTransaction(transactionToDelete.id);
+    } catch (err) {
+      console.error("Error in confirmDeleteSingle:", err);
+    } finally {
+      setDeleteConfirmOpen(false);
+      setTransactionToDelete(null);
+      setRelatedTransactions([]);
+    }
   };
 
   const confirmDeleteAll = async () => {
-    if (!transactionToDelete || relatedTransactions.length === 0) return;
+    if (!transactionToDelete || !relatedTransactions || relatedTransactions.length === 0) return;
     
-    if (user) {
-      try {
+    try {
+      if (user) {
         const batch = writeBatch(db);
         relatedTransactions.forEach(t => {
-          batch.delete(doc(db, 'users', user.uid, 'transactions', t.id));
+          if (t && t.id) {
+            batch.delete(doc(db, 'users', user.uid, 'transactions', t.id));
+          }
         });
         await batch.commit();
-      } catch (err) {
-        console.error("Error deleting all transactions from Firestore:", err);
+      } else {
+        const idsToDelete = new Set(relatedTransactions.filter(t => t && t.id).map(t => t.id));
+        setTransactions(prev => prev.filter(t => t && t.id && !idsToDelete.has(t.id)));
       }
-    } else {
-      const idsToDelete = new Set(relatedTransactions.map(t => t.id));
-      setTransactions(prev => prev.filter(t => !idsToDelete.has(t.id)));
+    } catch (err) {
+      console.error("Error in confirmDeleteAll:", err);
+    } finally {
+      setDeleteConfirmOpen(false);
+      setTransactionToDelete(null);
+      setRelatedTransactions([]);
     }
-    
-    setDeleteConfirmOpen(false);
-    setTransactionToDelete(null);
-    setRelatedTransactions([]);
   };
 
   const handleUpdateTransaction = async (id: string, data: Partial<FinanceTransaction>) => {
@@ -489,20 +509,26 @@ export default function App() {
   // Filter transactions for current month
   const monthStr = format(currentMonth, 'yyyy-MM');
   const filteredTransactions = transactions
-    .filter(t => t.month === monthStr)
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    .filter(t => t && t.month === monthStr)
+    .sort((a, b) => {
+      const aTime = a && a.date ? new Date(a.date).getTime() : 0;
+      const bTime = b && b.date ? new Date(b.date).getTime() : 0;
+      return bTime - aTime;
+    });
 
   const totals = filteredTransactions.reduce((acc, curr) => {
-    if (curr.type === 'income') {
-      acc.income += curr.amount;
-      if (curr.paid === false) acc.unpaidIncome += curr.amount;
-    } else {
-      acc.expense += curr.amount;
-      if (curr.paid === false) acc.unpaidExpense += curr.amount;
-      if (curr.periodicity === 'yearly') {
-        acc.yearlyExpense += curr.amount;
+    if (curr) {
+      if (curr.type === 'income') {
+        acc.income += curr.amount || 0;
+        if (curr.paid === false) acc.unpaidIncome += curr.amount || 0;
       } else {
-        acc.monthlyExpense += curr.amount;
+        acc.expense += curr.amount || 0;
+        if (curr.paid === false) acc.unpaidExpense += curr.amount || 0;
+        if (curr.periodicity === 'yearly') {
+          acc.yearlyExpense += curr.amount || 0;
+        } else {
+          acc.monthlyExpense += curr.amount || 0;
+        }
       }
     }
     return acc;
@@ -511,6 +537,7 @@ export default function App() {
   const balance = totals.income - totals.expense;
 
   const displayFilteredTransactions = filteredTransactions.filter(t => {
+    if (!t) return false;
     if (periodicityFilter === 'all') return true;
     if (periodicityFilter === 'monthly') return t.periodicity !== 'yearly';
     if (periodicityFilter === 'yearly') return t.periodicity === 'yearly';
@@ -529,44 +556,40 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans flex flex-col">
+    <div className="min-h-screen bg-[#FAFBFD] text-slate-800 font-sans flex flex-col">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 px-4 sm:px-8 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3 md:gap-4">
+      <header className="bg-white border-b border-slate-100/80 sticky top-0 z-20 px-4 sm:px-8 py-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div className="flex items-center justify-between w-full md:w-auto">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-sm shrink-0">
-              <Wallet className="h-5.5 w-5.5 sm:h-6 sm:w-6" />
-            </div>
-            <div>
-              <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-800 font-heading">Finanças Casal</h1>
-              <p className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
-                <span>Gestão Mensal</span>
-                <span>•</span>
-                <span className="text-slate-600 font-bold">{format(currentMonth, 'MMMM yyyy', { locale: ptBR })}</span>
-              </p>
-            </div>
+          <div className="flex items-center gap-3">
+            <span className="font-heading tracking-tight text-xl font-light text-slate-400">
+              finanças<span className="font-bold text-slate-800">casal</span>
+            </span>
+            <div className="h-4 w-[1px] bg-slate-200" />
+            <span className="text-[10px] bg-blue-50 text-blue-700 font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider font-heading">
+              {format(currentMonth, 'MMMM yyyy', { locale: ptBR })}
+            </span>
           </div>
         </div>
         
-        {/* Row 2 on Mobile, Right-aligned / distributed on desktop */}
+        {/* Actions / Switches */}
         <div className="flex items-center justify-between md:justify-end gap-3 sm:gap-4 w-full md:w-auto mt-0.5 md:mt-0">
-          {/* Saldo previsto */}
-          <div className="flex flex-col items-start md:items-end md:mr-3">
-            <span className="text-[9px] font-bold text-slate-450 uppercase tracking-tight">Saldo Previsto</span>
-            <span className={`font-bold text-base sm:text-lg leading-tight font-heading ${balance >= 0 ? 'text-blue-600' : 'text-rose-600'}`}>
-              R$ {balance.toLocaleString('pt-BR')}
+          {/* Saldo previsto Capsule */}
+          <div className="flex items-center gap-1.5 bg-slate-50/50 border border-slate-100 rounded-lg p-1 px-2.5">
+            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Previsto</span>
+            <span className={`font-semibold text-xs font-heading ${balance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+              R$ {balance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Month selector controls with touch-friendly Dropdown Select */}
-            <div className="flex items-center bg-slate-100 rounded-xl p-0.5 shadow-inner border border-slate-200">
+            {/* Month selector controls - beautiful & low profile */}
+            <div className="flex items-center bg-slate-50/50 border border-slate-100 rounded-lg p-0.5">
               <Button 
                 size="icon" 
                 variant="ghost" 
                 type="button"
                 onClick={() => changeMonth(-1)} 
-                className="h-7 w-7 sm:h-8 sm:w-8 hover:bg-white hover:shadow-xs transition-all rounded-lg cursor-pointer text-slate-550"
+                className="h-7 w-7 hover:bg-white hover:text-blue-600 rounded-md cursor-pointer text-slate-400 transition-all"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
               </Button>
@@ -575,16 +598,16 @@ export default function App() {
                 <select
                   value={format(currentMonth, 'yyyy-MM')}
                   onChange={handleSelectMonthChange}
-                  className="appearance-none bg-transparent pl-3 pr-7 py-1 text-xs font-bold uppercase tracking-tight text-slate-700 hover:text-blue-600 rounded-lg cursor-pointer focus:outline-none min-w-[100px] text-center shrink-0 transition-colors"
+                  className="appearance-none bg-transparent pl-2.5 pr-6 py-1 text-[11px] font-bold uppercase tracking-wider text-slate-600 hover:text-blue-600 rounded-md cursor-pointer focus:outline-none min-w-[90px] text-center shrink-0 transition-colors"
                   title="Selecione o mês"
                 >
                   {selectOptions.map((opt) => (
-                    <option key={opt.value} value={opt.value} className="text-slate-700 normal-case bg-white font-medium text-sm">
+                    <option key={opt.value} value={opt.value} className="text-slate-600 normal-case bg-white font-medium text-xs">
                       {opt.label.charAt(0).toUpperCase() + opt.label.slice(1)}
                     </option>
                   ))}
                 </select>
-                <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-1.5 pointer-events-none" />
+                <ChevronDown className="h-3 w-3 text-slate-400 absolute right-1 pointer-events-none" />
               </div>
               
               <Button 
@@ -592,34 +615,32 @@ export default function App() {
                 variant="ghost" 
                 type="button"
                 onClick={() => changeMonth(1)} 
-                className="h-7 w-7 sm:h-8 sm:w-8 hover:bg-white hover:shadow-xs transition-all rounded-lg cursor-pointer text-slate-550"
+                className="h-7 w-7 hover:bg-white hover:text-blue-600 rounded-md cursor-pointer text-slate-400 transition-all"
               >
                 <ChevronRight className="h-3.5 w-3.5" />
               </Button>
             </div>
             
-            {/* Cloud and Backup controls - fully responsive and unified */}
-            <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Cloud and Backup controls */}
+            <div className="flex items-center gap-2">
               {user ? (
-                <div className="flex items-center gap-1.5 sm:gap-2 bg-slate-50 border border-slate-150 p-1 rounded-xl">
-                  <div className="bg-emerald-50 text-emerald-700 font-bold text-[8px] sm:text-[9px] px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg border border-emerald-100 uppercase tracking-wider shadow-xs flex items-center gap-1 sm:gap-1.5">
-                    <Cloud className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-emerald-500 shrink-0" />
-                    <span>Nuvem</span>
+                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-100 p-0.5 rounded-lg pl-2">
+                  <div className="flex items-center gap-1 text-[9px] font-bold text-emerald-600 uppercase tracking-wider">
+                    <Cloud className="h-3 w-3 text-emerald-500 shrink-0" />
+                    <span className="hidden sm:inline">Sincronizado</span>
                   </div>
-                  <div className="flex flex-col text-right px-0.5 sm:px-1">
-                    <span className="text-[8px] sm:text-[10px] font-extrabold text-blue-600 uppercase tracking-tight max-w-[70px] sm:max-w-[110px] truncate" title={user.email || ''}>
-                      {user.email?.endsWith('@financas.com') ? user.email.split('@')[0] : user.email}
-                    </span>
-                  </div>
+                  <span className="text-[10px] font-semibold text-slate-500 max-w-[70px] sm:max-w-[100px] truncate" title={user.email || ''}>
+                    {user.email?.endsWith('@financas.com') ? user.email.split('@')[0] : user.email}
+                  </span>
                   <Button 
                     variant="ghost" 
                     size="icon" 
                     type="button"
                     onClick={handleLogout} 
                     title="Sair da Conta (Nuvem)"
-                    className="h-6 w-6 sm:h-8 sm:w-8 hover:bg-white hover:shadow-xs rounded-lg text-slate-400 hover:text-rose-600 transition-all cursor-pointer"
+                    className="h-6 w-6 hover:bg-white rounded-md text-slate-450 hover:text-rose-600 transition-all cursor-pointer"
                   >
-                    <LogOut className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                    <LogOut className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               ) : (
@@ -628,10 +649,10 @@ export default function App() {
                   variant="outline"
                   size="sm"
                   onClick={() => setAuthModalOpen(true)}
-                  className="bg-amber-50 text-amber-700 hover:bg-amber-100 font-bold text-[8px] sm:text-[10px] px-2 py-1.5 sm:px-2.5 sm:py-1.5 h-7 sm:h-8 rounded-lg border border-amber-150 uppercase tracking-wider shadow-xs flex items-center gap-1 sm:gap-1.5 cursor-pointer animate-pulse hover:animate-none group transition-all shrink-0"
+                  className="bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200/65 font-bold text-[9px] px-2.5 h-8 rounded-lg uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-xs transition-all shrink-0"
                 >
-                  <CloudOff className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-500 shrink-0 group-hover:rotate-12 transition-transform" />
-                  Sincronizar Nuvem
+                  <CloudOff className="h-3 w-3 text-slate-400 shrink-0" />
+                  Nuvem
                 </Button>
               )}
             </div>
@@ -641,7 +662,7 @@ export default function App() {
                 variant="outline" 
                 size="sm" 
                 onClick={handleExportData}
-                className="text-[10px] font-bold uppercase tracking-wider h-8 rounded-lg border-slate-200 cursor-pointer"
+                className="text-[9px] font-bold uppercase tracking-wider h-8 rounded-lg border-slate-200 hover:bg-slate-50 cursor-pointer"
               >
                 Exportar
               </Button>
@@ -657,7 +678,7 @@ export default function App() {
                   variant="outline" 
                   size="sm" 
                   onClick={() => document.getElementById('import-data')?.click()}
-                  className="text-[10px] font-bold uppercase tracking-wider h-8 rounded-lg border-slate-200 cursor-pointer"
+                  className="text-[9px] font-bold uppercase tracking-wider h-8 rounded-lg border-slate-200 hover:bg-slate-50 cursor-pointer"
                 >
                   Importar
                 </Button>
@@ -793,7 +814,7 @@ export default function App() {
               <div className="bg-slate-50 border border-slate-150 rounded-md p-3 text-xs text-slate-500 space-y-1.5 font-sans">
                 <span className="font-bold text-slate-700 flex items-center gap-1">📌 Informações do Grupo:</span>
                 <p>• Total de parcelas encontradas no sistema: <strong className="text-slate-800 font-extrabold">{relatedTransactions.length} meses/lançamentos</strong>.</p>
-                <p>• Valor de cada lançamento: <strong className="text-slate-800 font-extrabold">R$ {transactionToDelete?.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>.</p>
+                <p>• Valor de cada lançamento: <strong className="text-slate-800 font-extrabold">R$ {transactionToDelete ? transactionToDelete.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : '0,00'}</strong>.</p>
               </div>
               <p className="text-xs text-slate-400">
                 Escolha a opção desejada. Nenhuma das opções irá apagar dados de outros grupos ou transações não relacionadas.
@@ -864,58 +885,43 @@ export default function App() {
 
         <div className="grid grid-cols-12 gap-6 pb-8">
           <div className="col-span-12 lg:col-span-8 flex flex-col gap-6">
-            <Card className="flex-1 shadow-sm border-slate-200 rounded-2xl overflow-hidden flex flex-col">
-              <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                <h2 className="font-bold text-slate-700 flex items-center gap-2 font-heading">
-                  <Receipt className="h-5 w-5 text-blue-500" />
+            <Card className="flex-1 shadow-xs border border-slate-100 rounded-2xl overflow-hidden flex flex-col bg-white">
+              <div className="p-5 border-b border-slate-50 flex items-center justify-between">
+                <h2 className="text-base font-semibold text-slate-800 flex items-center gap-2 font-heading">
+                  <Receipt className="h-4.5 w-4.5 text-blue-500" />
                   Fluxo de Caixa Mensal
                 </h2>
                 <AddTransactionDialog onAdd={handleAddTransaction} />
               </div>
               
               <CardContent className="p-0 overflow-hidden flex flex-col">
-                <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4 bg-white">
-                  <div className="p-4 bg-emerald-50/50 rounded-xl border border-emerald-100 flex flex-col justify-between">
-                    <div>
-                      <p className="text-[10px] text-emerald-700 font-bold uppercase tracking-wider mb-2">Entradas (R$)</p>
-                      <div className="space-y-2">
-                        {filteredTransactions.filter(t => t.type === 'income').slice(0, 2).map((t, i) => (
-                          <div key={i} className="flex justify-between text-sm">
-                            <span className="text-slate-500 truncate mr-2">{t.description}</span>
-                            <span className="font-bold text-slate-700">R$ {t.amount.toLocaleString('pt-BR')}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                {/* Modern summary strip sitting as a sleek horizontal bar */}
+                <div className="mx-5 mt-5 p-4 bg-slate-50/60 rounded-xl border border-slate-100 grid grid-cols-3 gap-4 text-center">
+                  <div>
+                    <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-0.5">Entradas</span>
+                    <span className="text-sm font-semibold text-emerald-600 font-heading">R$ {totals.income.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                   </div>
-                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex flex-col justify-between">
-                    <div>
-                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-2">Despesas (R$)</p>
-                      <div className="space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-slate-500">Média</span>
-                          <span className="font-bold text-slate-700">R$ {filteredTransactions.length > 0 ? (totals.expense / (filteredTransactions.filter(t => t.type === 'expense').length || 1)).toLocaleString('pt-BR') : 0}</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-slate-500">Lançamentos</span>
-                          <span className="font-bold text-amber-600">{filteredTransactions.length} itens</span>
-                        </div>
-                      </div>
-                    </div>
+                  <div>
+                    <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-0.5">Despesas</span>
+                    <span className="text-sm font-semibold text-slate-700 font-heading">R$ {totals.expense.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-0.5">Sobra</span>
+                    <span className={`text-sm font-semibold font-heading ${balance >= 0 ? 'text-indigo-600' : 'text-rose-600'}`}>R$ {balance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                   </div>
                 </div>
 
-                <div className="p-4 flex-1">
-                  {/* Filtro de Periodicidade de Dívida */}
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-slate-100 pb-4 mb-4 gap-3">
-                    <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 self-start shadow-inner">
+                <div className="p-5 flex-1">
+                  {/* Filter Header controls - minimalist segmented design */}
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 mb-4 border-b border-slate-50 gap-3">
+                    <div className="flex bg-slate-100/85 p-0.5 rounded-lg border border-slate-200/50 self-start">
                       <button
                         type="button"
                         onClick={() => setPeriodicityFilter('all')}
-                        className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                        className={`px-3 py-1 text-[11px] font-bold rounded-md transition-all cursor-pointer ${
                           periodicityFilter === 'all' 
                             ? 'bg-white text-blue-600 shadow-xs' 
-                            : 'text-slate-500 hover:text-slate-900'
+                            : 'text-slate-500 hover:text-slate-800'
                         }`}
                       >
                         Todos ({filteredTransactions.length})
@@ -923,126 +929,105 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => setPeriodicityFilter('monthly')}
-                        className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                        className={`px-3 py-1 text-[11px] font-bold rounded-md transition-all cursor-pointer ${
                           periodicityFilter === 'monthly' 
                             ? 'bg-white text-blue-600 shadow-xs' 
-                            : 'text-slate-500 hover:text-slate-900'
+                            : 'text-slate-500 hover:text-slate-800'
                         }`}
                       >
-                        Mensais ({filteredTransactions.filter(t => t.periodicity !== 'yearly').length})
+                        Mensais ({filteredTransactions.filter(t => t && t.periodicity !== 'yearly').length})
                       </button>
                       <button
                         type="button"
                         onClick={() => setPeriodicityFilter('yearly')}
-                        className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                        className={`px-3 py-1 text-[11px] font-bold rounded-md transition-all cursor-pointer ${
                           periodicityFilter === 'yearly' 
                             ? 'bg-white text-blue-600 shadow-xs' 
-                            : 'text-slate-500 hover:text-slate-900'
+                            : 'text-slate-500 hover:text-slate-800'
                         }`}
                       >
-                        Anuais ({filteredTransactions.filter(t => t.periodicity === 'yearly').length})
+                        Anuais ({filteredTransactions.filter(t => t && t.periodicity === 'yearly').length})
                       </button>
                     </div>
 
-                    <div className="flex items-center gap-4 text-xs font-semibold text-slate-500 px-1">
-                      <span>Mensais: <strong className="text-slate-700 font-bold">R$ {totals.monthlyExpense.toLocaleString('pt-BR')}</strong></span>
-                      <span className="text-slate-300">|</span>
-                      <span>Anuais: <strong className="text-purple-600 font-bold">R$ {totals.yearlyExpense.toLocaleString('pt-BR')}</strong></span>
+                    <div className="flex items-center gap-3 text-[11px] font-medium text-slate-400 px-1">
+                      <span>Média por item: <strong className="text-slate-600 font-bold">R$ {filteredTransactions.length > 0 ? (totals.expense / (filteredTransactions.filter(t => t && t.type === 'expense').length || 1)).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) : '0,00'}</strong></span>
                     </div>
                   </div>
 
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-slate-400 text-left border-b border-slate-100">
-                          <th className="pb-3 px-2 font-semibold uppercase text-[10px] tracking-wider">Lançamento</th>
-                          <th className="pb-3 px-2 font-semibold uppercase text-[10px] tracking-wider text-right">Valor</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-50">
-                        {displayFilteredTransactions.length > 0 ? (
-                          displayFilteredTransactions.map((t) => (
-                            <tr key={t.id} className="group hover:bg-slate-50 transition-colors">
-                              <td className="py-3 px-2">
-                                <div className="flex items-center gap-3">
-                                  {/* Clickable Circle Checklist Toggle */}
-                                  <button
-                                    onClick={() => handleUpdateTransaction(t.id, { paid: t.paid === false ? true : false })}
-                                    className="flex-shrink-0 focus:outline-none transition-all active:scale-90"
-                                    title={t.paid === false ? "Marcar como Pago" : "Marcar como Não Pago"}
-                                  >
-                                    {t.paid === false ? (
-                                      <div className="w-5 h-5 rounded-full border-2 border-rose-300 bg-rose-50 hover:bg-color-100 flex items-center justify-center text-rose-400 cursor-pointer transition-colors">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-rose-300 animate-pulse" />
-                                      </div>
-                                    ) : (
-                                      <div className="w-5 h-5 rounded-full border-2 border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600 flex items-center justify-center cursor-pointer transition-colors">
-                                        <svg className="w-3.5 h-3.5 stroke-[3]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                        </svg>
-                                      </div>
-                                    )}
-                                  </button>
+                  {/* Transaction Modern Feed List */}
+                  <div className="space-y-2.5 max-h-[500px] overflow-y-auto pr-1">
+                    {displayFilteredTransactions.length > 0 ? (
+                      displayFilteredTransactions.map((t) => (
+                        <div 
+                          key={t.id} 
+                          className="group flex items-center justify-between p-3.5 bg-white border border-slate-100 hover:border-slate-200/85 hover:bg-slate-50/20 rounded-xl transition-all"
+                        >
+                          <div className="flex items-center gap-3.5 min-w-0">
+                            {/* Modern checklist toggle */}
+                            <button
+                              onClick={() => handleUpdateTransaction(t.id, { paid: t.paid === false ? true : false })}
+                              className="focus:outline-none transition-all active:scale-95 shrink-0"
+                              title={t.paid === false ? "Marcar como Pago" : "Marcar como Não Pago"}
+                            >
+                              {t.paid === false ? (
+                                <div className="w-5.5 h-5.5 rounded-full border border-rose-250 bg-rose-50/40 hover:bg-rose-50 flex items-center justify-center text-rose-400 cursor-pointer transition-colors">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-rose-450 animate-pulse" />
+                                </div>
+                              ) : (
+                                <div className="w-5.5 h-5.5 rounded-full border border-emerald-300 bg-emerald-50 text-emerald-600 flex items-center justify-center cursor-pointer hover:bg-emerald-100/80 transition-colors">
+                                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                </div>
+                              )}
+                            </button>
 
-                                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${t.type === 'income' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-600'}`}>
-                                    {t.type === 'income' ? <Plus className="h-4 w-4" /> : <div className="w-1.5 h-1.5 rounded-full bg-current" />}
-                                  </div>
-                                  <div>
-                                    <p className={`font-bold text-slate-700 leading-tight ${t.paid === false ? 'text-slate-500 font-medium' : ''}`}>{t.description}</p>
-                                    <div className="flex items-center gap-2 mt-0.5">
-                                      <p className="text-[10px] text-slate-400 font-medium">{format(safeParseDate(t.date), 'dd MMM', { locale: ptBR })}</p>
-                                      <span className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider ${
-                                        t.paid === false 
-                                          ? 'bg-rose-50 text-rose-600 border border-rose-100' 
-                                          : 'bg-emerald-50 text-emerald-600 border border-emerald-100'
-                                      }`}>
-                                        {t.type === 'income' 
-                                          ? (t.paid === false ? 'A receber' : 'Recebido') 
-                                          : (t.paid === false ? 'Não Pago' : 'Pago')}
-                                      </span>
-                                      <span className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider ${
-                                        t.periodicity === 'yearly'
-                                          ? 'bg-purple-50 text-purple-600 border border-purple-100'
-                                          : 'bg-slate-100 text-slate-600 border border-slate-150'
-                                      }`}>
-                                        {t.periodicity === 'yearly' ? 'Anual' : 'Mensal'}
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="py-3 px-2 text-right">
-                                <span className={`font-bold tabular-nums ${t.type === 'income' ? 'text-emerald-600' : 'text-slate-800'}`}>
-                                  {t.type === 'income' ? '' : '-'} R$ {t.amount.toLocaleString('pt-BR')}
+                            <div className="min-w-0">
+                              <p className={`font-semibold text-slate-700 text-sm leading-snug truncate ${t.paid === false ? 'text-slate-450 font-medium line-through' : ''}`}>
+                                {t.description}
+                              </p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-[10px] text-slate-400 font-medium">
+                                  {format(safeParseDate(t.date), 'dd MMM', { locale: ptBR })}
                                 </span>
-                              </td>
-                              <td className="py-3 pl-2 text-right opacity-0 group-hover:opacity-100 transition-opacity">
-                                <div className="flex items-center justify-end gap-1">
-                                  <EditTransactionDialog transaction={t} onUpdate={handleUpdateTransaction} />
-                                  <Button 
-                                    variant="ghost" 
-                                    size="icon" 
-                                    onClick={() => onInitiateDelete(t)}
-                                    className="h-8 w-8 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))
-                        ) : (
-                          <tr>
-                            <td colSpan={3} className="py-20 text-center">
-                              <div className="flex flex-col items-center gap-2 opacity-20">
-                                <History className="h-10 w-10 text-slate-400" />
-                                <p className="font-bold uppercase text-xs tracking-widest">Sem lançamentos</p>
+                                <span className="text-slate-300">•</span>
+                                <span className={`text-[9px] font-medium uppercase tracking-wider ${
+                                  t.periodicity === 'yearly'
+                                    ? 'text-purple-600'
+                                    : 'text-slate-550'
+                                }`}>
+                                  {t.periodicity === 'yearly' ? 'Anual' : 'Mensal'}
+                                </span>
                               </div>
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-4 pl-3 shrink-0">
+                            <span className={`font-semibold text-sm tabular-nums tracking-tight font-heading ${t.type === 'income' ? 'text-emerald-600' : 'text-slate-800'}`}>
+                              {t.type === 'income' ? '+' : '-'} R$ {t.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </span>
+
+                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <EditTransactionDialog transaction={t} onUpdate={handleUpdateTransaction} />
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                onClick={() => onInitiateDelete(t)}
+                                className="h-7 w-7 text-slate-350 hover:text-rose-500 hover:bg-rose-50 rounded-md transition-colors"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="py-16 text-center">
+                        <div className="flex flex-col items-center gap-2.5 text-slate-400/60">
+                          <History className="h-8 w-8 text-slate-300" />
+                          <p className="font-bold text-[10px] uppercase tracking-widest text-slate-400">Nenhum lançamento encontrado</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -1050,48 +1035,77 @@ export default function App() {
           </div>
 
           <div className="col-span-12 lg:col-span-4 flex flex-col gap-6">
-            <Card className="shadow-sm border-slate-200 rounded-2xl flex flex-col">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-lg font-bold flex items-center gap-2 font-heading">
-                  <TrendingUp className="h-5 w-5 text-indigo-500" />
-                  Visualização Financeira
+            <Card className="shadow-xs border border-slate-100 rounded-2xl bg-white flex flex-col">
+              <CardHeader className="pb-3 border-b border-slate-50">
+                <CardTitle className="text-base font-semibold flex items-center gap-2 font-heading text-slate-800">
+                  <TrendingUp className="h-4.5 w-4.5 text-indigo-500" />
+                  Divisão de Gasto / Orçamento
                 </CardTitle>
               </CardHeader>
-              <CardContent className="flex-1 flex flex-col px-6 pb-6">
-                <div className="flex items-end justify-around gap-6 pb-4 mt-6 h-40">
-                  <BarIndicator label="Receita" value={totals.income} total={Math.max(totals.income, totals.expense)} color="bg-emerald-500" />
-                  <BarIndicator label="Fixos" value={totals.expense} total={Math.max(totals.income, totals.expense)} color="bg-slate-300" />
-                  <BarIndicator label="Sobra" value={Math.max(0, balance)} total={Math.max(totals.income, totals.expense)} color="bg-blue-500" />
+              <CardContent className="flex-1 flex flex-col p-6">
+                {/* Horizontal bento progress indicator */}
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1.5">Consumo do Orçamento</span>
+                <div className="bg-slate-50/50 rounded-xl p-4 border border-slate-100/60 mb-6">
+                  {(() => {
+                    const pctSpent = totals.income > 0 ? (totals.expense / totals.income) * 100 : 0;
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex items-baseline justify-between text-xs font-semibold">
+                          <span className="text-slate-600">Comprometido</span>
+                          <span className={`${pctSpent > 85 ? 'text-rose-600' : 'text-slate-800'}`}>
+                            {pctSpent.toFixed(0)}% das entradas
+                          </span>
+                        </div>
+                        <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                          <motion.div 
+                            className={`h-full rounded-full ${pctSpent > 85 ? 'bg-rose-500' : 'bg-indigo-500'}`}
+                            initial={{ width: 0 }}
+                            animate={{ width: `${Math.min(100, pctSpent)}%` }}
+                            transition={{ duration: 0.8, ease: "easeOut" }}
+                          />
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-medium block">
+                          Sua margem de economia é de R$ {Math.max(0, balance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
 
-                <div className="border-t border-slate-100 pt-4 mt-4 text-xs">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-3">Divisão das despesas</span>
+                <div className="space-y-4 text-xs">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Detalhamento das Contas</span>
                   
-                  <div className="space-y-3">
-                    <div>
-                      <div className="flex justify-between font-semibold text-slate-600 mb-1">
+                  <div className="space-y-4">
+                    <div className="p-3.5 bg-slate-50/30 rounded-xl border border-slate-100/60">
+                      <div className="flex justify-between font-semibold text-slate-700 mb-1.5">
                         <span>Dívidas Mensais</span>
-                        <span>R$ {totals.monthlyExpense.toLocaleString('pt-BR')} ({totals.expense > 0 ? ((totals.monthlyExpense / totals.expense) * 100).toFixed(0) : 0}%)</span>
+                        <span className="font-mono">R$ {totals.monthlyExpense.toLocaleString('pt-BR')}</span>
                       </div>
-                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
                         <div 
-                          className="h-full bg-slate-500 rounded-full" 
+                          className="h-full bg-slate-400 rounded-full transition-all" 
                           style={{ width: `${totals.expense > 0 ? (totals.monthlyExpense / totals.expense) * 100 : 0}%` }}
                         />
                       </div>
+                      <span className="text-[9.5px] text-slate-400 font-medium mt-1.5 block">
+                        Representa {totals.expense > 0 ? ((totals.monthlyExpense / totals.expense) * 100).toFixed(0) : 0}% das despesas totais
+                      </span>
                     </div>
 
-                    <div>
-                      <div className="flex justify-between font-semibold text-slate-600 mb-1">
+                    <div className="p-3.5 bg-slate-50/30 rounded-xl border border-slate-100/60">
+                      <div className="flex justify-between font-semibold text-slate-700 mb-1.5">
                         <span>Dívidas Anuais</span>
-                        <span>R$ {totals.yearlyExpense.toLocaleString('pt-BR')} ({totals.expense > 0 ? ((totals.yearlyExpense / totals.expense) * 100).toFixed(0) : 0}%)</span>
+                        <span className="font-mono">R$ {totals.yearlyExpense.toLocaleString('pt-BR')}</span>
                       </div>
-                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
                         <div 
-                          className="h-full bg-purple-500 rounded-full" 
+                          className="h-full bg-purple-500 rounded-full transition-all" 
                           style={{ width: `${totals.expense > 0 ? (totals.yearlyExpense / totals.expense) * 100 : 0}%` }}
                         />
                       </div>
+                      <span className="text-[9.5px] text-slate-400 font-medium mt-1.5 block">
+                        Representa {totals.expense > 0 ? ((totals.yearlyExpense / totals.expense) * 100).toFixed(0) : 0}% das despesas totais
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -1118,33 +1132,34 @@ export default function App() {
 
 function KPICard({ label, amount, color, isPercent = false, subtext }: { label: string, amount: number, color: 'emerald' | 'slate' | 'amber' | 'blue', isPercent?: boolean, subtext?: string }) {
   const textColors = {
-    emerald: 'text-emerald-600',
+    emerald: 'text-emerald-650',
     slate: 'text-slate-800',
     amber: 'text-amber-600',
-    blue: 'text-blue-600'
+    blue: 'text-indigo-600'
+  };
+
+  const borderColors = {
+    emerald: 'border-emerald-100',
+    slate: 'border-slate-100',
+    amber: 'border-amber-100',
+    blue: 'border-indigo-100'
   };
 
   return (
-    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-slate-300 transition-all flex flex-col justify-between min-h-[105px]">
+    <div className={`bg-white p-5 rounded-2xl border ${borderColors[color] || 'border-slate-100'} shadow-xs hover:shadow-sm transition-all flex flex-col justify-between min-h-[105px]`}>
       <div>
-        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{label}</p>
-        <div className="flex items-end gap-2">
-          <p className={`text-2xl font-bold font-heading tabular-nums leading-none ${textColors[color]}`}>
-            {isPercent ? `${amount.toFixed(0)}%` : `R$ ${amount.toLocaleString('pt-BR')}`}
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{label}</p>
+          <span className={`w-2 h-2 rounded-full ${color === 'emerald' ? 'bg-emerald-400' : color === 'amber' ? 'bg-amber-400' : color === 'blue' ? 'bg-indigo-400' : 'bg-slate-400'}`} />
+        </div>
+        <div className="flex items-baseline gap-1.5">
+          <p className={`text-2xl sm:text-2.5xl font-semibold font-heading tracking-tight tabular-nums leading-none ${textColors[color]}`}>
+            {isPercent ? `${amount.toFixed(0)}%` : `R$ ${amount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           </p>
-          {isPercent && (
-             <div className="flex-1 h-2 bg-slate-50 border border-slate-100 rounded-full overflow-hidden mb-1">
-              <motion.div 
-                className="h-full bg-blue-500 rounded-full" 
-                initial={{ width: 0 }}
-                animate={{ width: `${Math.min(100, Math.max(0, amount))}%` }}
-              />
-            </div>
-          )}
         </div>
       </div>
       {subtext && (
-        <span className="text-[10px] font-semibold text-slate-400 mt-2 block border-t border-slate-50 pt-1.5">
+        <span className="text-[10px] font-medium text-slate-450 mt-3 block border-t border-slate-50 pt-1.5 truncate">
           {subtext}
         </span>
       )}

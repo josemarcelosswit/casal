@@ -1261,8 +1261,8 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
     if (isNaN(parsedAmount)) return;
 
     if (!initialData && isRecurring && parseInt(recurringMonths) > 1) {
-      const baseDate = new Date(date + 'T12:00:00');
-      const monthsCount = parseInt(recurringMonths);
+      const baseDate = safeParseDate(date ? date + 'T12:00:00' : new Date());
+      const monthsCount = parseInt(recurringMonths) || 1;
       const recurrenceId = 'group_' + Math.random().toString(36).substr(2, 9);
       
       const installmentAmount = recurringType === 'split'
@@ -1284,11 +1284,12 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
         });
       }
     } else {
+      const finalDate = safeParseDate(date ? date + 'T12:00:00' : new Date());
       onSave({
         type,
         amount: parsedAmount,
         description,
-        date: new Date(date + 'T12:00:00').toISOString(),
+        date: finalDate.toISOString(),
         paid: paid,
         periodicity: periodicity
       });

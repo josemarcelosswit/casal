@@ -302,19 +302,29 @@ export default function App() {
     e.preventDefault();
     setAuthError('');
     if (!authEmail || !authPassword) {
-      setAuthError('Preencha os campos de E-mail e Senha.');
+      setAuthError('Preencha os campos de E-mail ou Usuário e Senha.');
       return;
     }
-    if (authPassword.length < 6) {
-      setAuthError('A senha precisa conter no mínimo 6 caracteres.');
-      return;
-    }
+    
+    const emailStr = authEmail.trim().toLowerCase();
+    const finalEmail = emailStr.includes('@') ? emailStr : `${emailStr}@financas.com`;
+    const finalPassword = authPassword.length < 6 ? authPassword.padEnd(6, '0') : authPassword;
+
     setSubmittingAuth(true);
     try {
       if (authMode === 'login') {
-        await signInWithEmailAndPassword(auth, authEmail, authPassword);
+        try {
+          await signInWithEmailAndPassword(auth, finalEmail, finalPassword);
+        } catch (err: any) {
+          if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+            // Se o usuário não existe ainda, cria a conta na hora de forma mágica e silenciosa!
+            await createUserWithEmailAndPassword(auth, finalEmail, finalPassword);
+          } else {
+            throw err;
+          }
+        }
       } else {
-        await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+        await createUserWithEmailAndPassword(auth, finalEmail, finalPassword);
       }
       setAuthModalOpen(false);
       setAuthEmail('');
@@ -326,7 +336,7 @@ export default function App() {
       } else if (err.code === 'auth/email-already-in-use') {
         setAuthError('Este endereço de e-mail já está sendo utilizado.');
       } else if (err.code === 'auth/invalid-email') {
-        setAuthError('Modelo de e-mail inválido.');
+        setAuthError('Formato de e-mail ou usuário inválido.');
       } else if (err.code === 'auth/weak-password') {
         setAuthError('A senha precisa conter no mínimo 6 caracteres.');
       } else {
@@ -436,12 +446,11 @@ export default function App() {
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-150 p-1 rounded-xl">
               <div className="bg-emerald-50 text-emerald-700 font-bold text-[9px] px-2.5 py-1.5 rounded-lg border border-emerald-100 uppercase tracking-wider shadow-xs flex items-center gap-1.5">
                 <Cloud className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                <span className="hidden sm:inline">Sincronizado</span>
-                <span className="sm:hidden">Nuvem</span>
+                <span>Nuvem</span>
               </div>
-              <div className="hidden lg:flex flex-col text-right px-1">
-                <span className="text-[9px] font-bold text-slate-450 max-w-[110px] truncate" title={user.email || ''}>
-                  {user.displayName || user.email}
+              <div className="flex flex-col text-right px-1">
+                <span className="text-[10px] font-extrabold text-blue-600 uppercase tracking-tight max-w-[110px] truncate" title={user.email || ''}>
+                  {user.email?.endsWith('@financas.com') ? user.email.split('@')[0] : user.email}
                 </span>
               </div>
               <Button 
@@ -484,28 +493,36 @@ export default function App() {
                   </div>
                 )}
 
+                {/* Direct Help Banner for specific credentials */}
+                <div className="bg-blue-50/80 p-3 rounded-xl border border-blue-100 text-xs text-blue-700 space-y-1">
+                  <span className="font-bold flex items-center gap-1">🔑 Acesso Prontinho:</span>
+                  <p className="text-[11px] leading-relaxed text-blue-600">
+                    Digite o usuário <strong className="font-extrabold bg-white px-1.5 py-0.5 rounded border border-blue-200 text-blue-700">cerveja</strong> e a senha <strong className="font-extrabold bg-white px-1.5 py-0.5 rounded border border-blue-200 text-blue-700">1411</strong> abaixo para abrir sua conta sincronizada!
+                  </p>
+                </div>
+
                 <form onSubmit={handleEmailAuth} className="space-y-4">
                   <div className="space-y-1.5">
-                    <Label htmlFor="auth-email" className="text-[10px] font-bold uppercase text-slate-400">E-mail</Label>
+                    <Label htmlFor="auth-email" className="text-[10px] font-bold uppercase text-slate-400">E-mail ou Usuário</Label>
                     <Input
                       id="auth-email"
-                      type="email"
+                      type="text"
                       value={authEmail}
                       onChange={(e) => setAuthEmail(e.target.value)}
-                      placeholder="exemplo@email.com"
+                      placeholder="Ex: cerveja ou seu e-mail"
                       className="rounded-xl border-slate-250 focus-visible:ring-blue-500/25 focus-visible:border-blue-500 placeholder:text-slate-350"
                       required
                     />
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label htmlFor="auth-password" className="text-[10px] font-bold uppercase text-slate-400">Senha (mínimo 6 caracteres)</Label>
+                    <Label htmlFor="auth-password" className="text-[10px] font-bold uppercase text-slate-400">Senha</Label>
                     <Input
                       id="auth-password"
                       type="password"
                       value={authPassword}
                       onChange={(e) => setAuthPassword(e.target.value)}
-                      placeholder="******"
+                      placeholder="Ex: 1411"
                       className="rounded-xl border-slate-250 focus-visible:ring-blue-500/25 focus-visible:border-blue-500"
                       required
                     />
@@ -521,74 +538,13 @@ export default function App() {
                     ) : (
                       <LogIn className="h-4 w-4" />
                     )}
-                    {authMode === 'login' ? 'Entrar com E-mail' : 'Criar minha Conta'}
+                    Entrar e Sincronizar
                   </Button>
                 </form>
 
-                <div className="text-center">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAuthError('');
-                      setAuthMode(authMode === 'login' ? 'register' : 'login');
-                    }}
-                    className="text-xs text-blue-600 hover:underline font-semibold cursor-pointer"
-                  >
-                    {authMode === 'login' 
-                      ? 'Primeira vez aqui? Crie sua conta grátis' 
-                      : 'Já tem uma conta criada? Faça login'}
-                  </button>
-                </div>
-
-                <div className="relative flex items-center justify-center border-t border-slate-100 pt-4 mt-2">
-                  <span className="absolute bg-white px-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Ou use sua Conta</span>
-                </div>
-
-                {/* Social Sign In (Google) */}
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={submittingAuth}
-                  onClick={async () => {
-                    setAuthError('');
-                    setSubmittingAuth(true);
-                    try {
-                      const provider = new GoogleAuthProvider();
-                      await signInWithPopup(auth, provider);
-                      setAuthModalOpen(false);
-                    } catch (err: any) {
-                      console.error("Google Auth error:", err);
-                      setAuthError('Falha ao autenticar com o Google. Se estiver no celular, tente usar o e-mail e senha acima!');
-                    } finally {
-                      setSubmittingAuth(false);
-                    }
-                  }}
-                  className="w-full h-11 border-slate-200 hover:bg-slate-50 font-bold rounded-xl cursor-pointer transition-all flex items-center justify-center gap-2.5"
-                >
-                  <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24">
-                    <path
-                      fill="#4285F4"
-                      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v3.91h6.63c-.29 1.5-.14 3.01-1.01 4.13v3.42h6.63c3.88-3.58 6.13-8.86 6.13-14.9a12.5 12.5 0 0 0-.01-.49z"
-                    />
-                    <path
-                      fill="#34A853"
-                      d="M12 24c3.24 0 5.97-1.08 7.96-2.91l-6.2-4.82c-1.72 1.15-3.92 1.83-6.23 1.83-4.79 0-8.84-3.24-10.29-7.6H1.05v4.96C4.04 21.05 7.8 24 12 24z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M1.71 10.5c-.37-1.11-.58-2.29-.58-3.5s.21-2.39.58-3.5V2.04H1.05A12.004 12.004 0 0 0 0 12c0 3.24.81 6.3 2.23 8.96L1.71 10.5z"
-                    />
-                    <path
-                      fill="#EA4335"
-                      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.96 1.19 15.24 0 12 0 7.8 0 4.04 2.95 1.05 7.04l4.96 4.96c1.45-4.36 5.5-7.6 10.29-7.6z"
-                    />
-                  </svg>
-                  Google Account
-                </Button>
-
-                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150 text-[10px] text-slate-500 font-semibold space-y-1">
-                  <span className="flex items-center gap-1.5"><Smartphone className="h-3.5 w-3.5 text-blue-500 shrink-0" /> Ideal para usar no celular e computador juntos!</span>
-                  <span className="flex items-center gap-1.5"><Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" /> Seus dados locais são migrados de forma automática!</span>
+                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150 text-[10px] text-slate-500 font-semibold space-y-1 text-center">
+                  <span className="flex items-center justify-center gap-1.5"><Smartphone className="h-3.5 w-3.5 text-blue-500 shrink-0" /> Perfeito para usar no celular e PC!</span>
+                  <span className="flex items-center justify-center gap-1.5 text-emerald-600"><Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" /> Seus dados atuais migram automaticamente!</span>
                 </div>
               </DialogContent>
             </Dialog>

@@ -4,7 +4,7 @@ import {
 } from 'recharts';
 import { 
   Wallet, TrendingUp, Plus, Trash2, Calendar, 
-  ChevronLeft, ChevronRight, Receipt, History, Pencil,
+  ChevronLeft, ChevronRight, ChevronDown, Receipt, History, Pencil,
   Cloud, CloudOff, Loader2, LogIn, LogOut, Check, Info, AlertCircle, RefreshCw, Smartphone
 } from 'lucide-react';
 import { format, subMonths, addMonths, parseISO } from 'date-fns';
@@ -39,9 +39,58 @@ import {
 
 const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
+function safeParseDate(dateVal: any): Date {
+  if (!dateVal) return new Date();
+  if (dateVal instanceof Date) {
+    return isNaN(dateVal.getTime()) ? new Date() : dateVal;
+  }
+  // Handle Firestore Timestamp object
+  if (dateVal && typeof dateVal === 'object' && 'seconds' in dateVal) {
+    return new Date((dateVal.seconds || 0) * 1000);
+  }
+  try {
+    const parsed = parseISO(String(dateVal));
+    if (!isNaN(parsed.getTime())) return parsed;
+  } catch (e) {}
+  
+  const d = new Date(dateVal);
+  if (!isNaN(d.getTime())) return d;
+  
+  return new Date();
+}
+
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
+
+  // Generate list of 24 months around the current date for the dropdown selector
+  const selectOptions = React.useMemo(() => {
+    const list = Array.from({ length: 25 }, (_, i) => {
+      const d = addMonths(new Date(), i - 12);
+      return {
+        value: format(d, 'yyyy-MM'),
+        label: format(d, 'MMMM yyyy', { locale: ptBR }),
+      };
+    });
+    
+    // Check if the current selected month is in the list
+    const currentFormatted = format(currentMonth, 'yyyy-MM');
+    const exists = list.some(item => item.value === currentFormatted);
+    if (!exists) {
+      list.push({
+        value: currentFormatted,
+        label: format(currentMonth, 'MMMM yyyy', { locale: ptBR })
+      });
+      list.sort((a, b) => a.value.localeCompare(b.value));
+    }
+    return list;
+  }, [currentMonth]);
+
+  const handleSelectMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value; // "yyyy-MM"
+    const parsed = safeParseDate(`${val}-15`);
+    setCurrentMonth(parsed);
+  };
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
   const [periodicityFilter, setPeriodicityFilter] = useState<'all' | 'monthly' | 'yearly'>('all');
 
@@ -68,7 +117,7 @@ export default function App() {
     // Sync current month state from LocalStorage on mount
     const savedMonth = localStorage.getItem('financas_cadal_month');
     if (savedMonth) {
-      setCurrentMonth(new Date(savedMonth));
+      setCurrentMonth(safeParseDate(savedMonth));
     }
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
@@ -237,7 +286,7 @@ export default function App() {
   };
 
   const handleAddTransaction = async (data: Partial<FinanceTransaction>) => {
-    const trxDate = data.date ? parseISO(data.date) : new Date();
+    const trxDate = data.date ? safeParseDate(data.date) : new Date();
     const newId = Math.random().toString(36).substr(2, 9);
     const newTransaction: FinanceTransaction = {
       id: newId,
@@ -279,7 +328,7 @@ export default function App() {
   const handleUpdateTransaction = async (id: string, data: Partial<FinanceTransaction>) => {
     const updatedData: Record<string, any> = { ...data };
     if (data.date) {
-      updatedData.month = format(parseISO(data.date), 'yyyy-MM');
+      updatedData.month = format(safeParseDate(data.date), 'yyyy-MM');
     }
 
     if (user) {
@@ -293,7 +342,7 @@ export default function App() {
         if (t.id === id) {
           const updated = { ...t, ...data };
           if (data.date) {
-            updated.month = format(parseISO(data.date), 'yyyy-MM');
+            updated.month = format(safeParseDate(data.date), 'yyyy-MM');
           }
           return updated;
         }
@@ -412,214 +461,251 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans flex flex-col">
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 px-4 sm:px-8 py-3 flex flex-col md:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-3 w-full md:w-auto">
-          <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-sm shrink-0">
-            <Wallet className="h-6 w-6" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-slate-800 font-heading">Finanças Casal</h1>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-              <span>Gestão Mensal</span>
-              <span>•</span>
-              <span className="text-slate-500 font-semibold">{format(currentMonth, 'MMMM yyyy', { locale: ptBR })}</span>
-            </p>
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 px-4 sm:px-8 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3 md:gap-4">
+        <div className="flex items-center justify-between w-full md:w-auto">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-sm shrink-0">
+              <Wallet className="h-5.5 w-5.5 sm:h-6 sm:w-6" />
+            </div>
+            <div>
+              <h1 className="text-lg sm:text-xl font-bold tracking-tight text-slate-800 font-heading">Finanças Casal</h1>
+              <p className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
+                <span>Gestão Mensal</span>
+                <span>•</span>
+                <span className="text-slate-600 font-bold">{format(currentMonth, 'MMMM yyyy', { locale: ptBR })}</span>
+              </p>
+            </div>
           </div>
         </div>
         
-        <div className="flex flex-wrap items-center justify-between md:justify-end gap-3 sm:gap-4 w-full md:w-auto">
-          {/* Saldo previsto - responsive hiding/showing */}
-          <div className="flex flex-col items-end mr-1 sm:mr-3">
+        {/* Row 2 on Mobile, Right-aligned / distributed on desktop */}
+        <div className="flex items-center justify-between md:justify-end gap-3 sm:gap-4 w-full md:w-auto mt-0.5 md:mt-0">
+          {/* Saldo previsto */}
+          <div className="flex flex-col items-start md:items-end md:mr-3">
             <span className="text-[9px] font-bold text-slate-450 uppercase tracking-tight">Saldo Previsto</span>
-            <span className={`font-bold text-lg leading-tight font-heading ${balance >= 0 ? 'text-blue-600' : 'text-rose-600'}`}>
+            <span className={`font-bold text-base sm:text-lg leading-tight font-heading ${balance >= 0 ? 'text-blue-600' : 'text-rose-600'}`}>
               R$ {balance.toLocaleString('pt-BR')}
             </span>
           </div>
 
-          {/* Month selector controls */}
-          <div className="flex items-center bg-slate-100 rounded-xl p-0.5 shadow-inner border border-slate-200">
-            <Button size="icon" variant="ghost" onClick={() => changeMonth(-1)} className="h-7 w-7 sm:h-8 sm:w-8 hover:bg-white hover:shadow-sm transition-all rounded-lg">
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="px-1.5 sm:px-3 text-[10px] sm:text-xs font-bold min-w-[85px] sm:min-w-[110px] text-center uppercase tracking-tight text-slate-650">
-              {format(currentMonth, 'MMM yyyy', { locale: ptBR })}
-            </span>
-            <Button size="icon" variant="ghost" onClick={() => changeMonth(1)} className="h-7 w-7 sm:h-8 sm:w-8 hover:bg-white hover:shadow-sm transition-all rounded-lg">
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-          
-          {/* Cloud Synchronization and Account Sync Component */}
-          {user ? (
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-150 p-1 rounded-xl">
-              <div className="bg-emerald-50 text-emerald-700 font-bold text-[9px] px-2.5 py-1.5 rounded-lg border border-emerald-100 uppercase tracking-wider shadow-xs flex items-center gap-1.5">
-                <Cloud className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                <span>Nuvem</span>
-              </div>
-              <div className="flex flex-col text-right px-1">
-                <span className="text-[10px] font-extrabold text-blue-600 uppercase tracking-tight max-w-[110px] truncate" title={user.email || ''}>
-                  {user.email?.endsWith('@financas.com') ? user.email.split('@')[0] : user.email}
-                </span>
-              </div>
+          <div className="flex items-center gap-2">
+            {/* Month selector controls with touch-friendly Dropdown Select */}
+            <div className="flex items-center bg-slate-100 rounded-xl p-0.5 shadow-inner border border-slate-200">
               <Button 
-                variant="ghost" 
                 size="icon" 
-                onClick={handleLogout} 
-                title="Sair da Conta (Nuvem)"
-                className="h-7 w-7 sm:h-8 sm:w-8 hover:bg-white hover:shadow-xs rounded-lg text-slate-400 hover:text-rose-600 transition-all cursor-pointer"
+                variant="ghost" 
+                type="button"
+                onClick={() => changeMonth(-1)} 
+                className="h-7 w-7 sm:h-8 sm:w-8 hover:bg-white hover:shadow-xs transition-all rounded-lg cursor-pointer text-slate-550"
               >
-                <LogOut className="h-4 w-4" />
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              
+              <div className="relative flex items-center bg-transparent">
+                <select
+                  value={format(currentMonth, 'yyyy-MM')}
+                  onChange={handleSelectMonthChange}
+                  className="appearance-none bg-transparent pl-3 pr-7 py-1 text-xs font-bold uppercase tracking-tight text-slate-700 hover:text-blue-600 rounded-lg cursor-pointer focus:outline-none min-w-[100px] text-center shrink-0 transition-colors"
+                  title="Selecione o mês"
+                >
+                  {selectOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value} className="text-slate-700 normal-case bg-white font-medium text-sm">
+                      {opt.label.charAt(0).toUpperCase() + opt.label.slice(1)}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-1.5 pointer-events-none" />
+              </div>
+              
+              <Button 
+                size="icon" 
+                variant="ghost" 
+                type="button"
+                onClick={() => changeMonth(1)} 
+                className="h-7 w-7 sm:h-8 sm:w-8 hover:bg-white hover:shadow-xs transition-all rounded-lg cursor-pointer text-slate-550"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
               </Button>
             </div>
-          ) : (
-            <Dialog open={authModalOpen} onOpenChange={setAuthModalOpen}>
-              <DialogTrigger asChild>
+            
+            {/* Cloud and Backup controls - fully responsive and unified */}
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              {user ? (
+                <div className="flex items-center gap-1.5 sm:gap-2 bg-slate-50 border border-slate-150 p-1 rounded-xl">
+                  <div className="bg-emerald-50 text-emerald-700 font-bold text-[8px] sm:text-[9px] px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg border border-emerald-100 uppercase tracking-wider shadow-xs flex items-center gap-1 sm:gap-1.5">
+                    <Cloud className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-emerald-500 shrink-0" />
+                    <span>Nuvem</span>
+                  </div>
+                  <div className="flex flex-col text-right px-0.5 sm:px-1">
+                    <span className="text-[8px] sm:text-[10px] font-extrabold text-blue-600 uppercase tracking-tight max-w-[70px] sm:max-w-[110px] truncate" title={user.email || ''}>
+                      {user.email?.endsWith('@financas.com') ? user.email.split('@')[0] : user.email}
+                    </span>
+                  </div>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    type="button"
+                    onClick={handleLogout} 
+                    title="Sair da Conta (Nuvem)"
+                    className="h-6 w-6 sm:h-8 sm:w-8 hover:bg-white hover:shadow-xs rounded-lg text-slate-400 hover:text-rose-600 transition-all cursor-pointer"
+                  >
+                    <LogOut className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  </Button>
+                </div>
+              ) : (
                 <Button 
+                  type="button"
                   variant="outline"
                   size="sm"
-                  className="bg-amber-50 text-amber-700 hover:bg-amber-100 font-bold text-[10px] px-2.5 py-1.5 h-8 rounded-lg border border-amber-150 uppercase tracking-wider shadow-xs flex items-center gap-1.5 cursor-pointer animate-pulse hover:animate-none group transition-all shrink-0"
+                  onClick={() => setAuthModalOpen(true)}
+                  className="bg-amber-50 text-amber-700 hover:bg-amber-100 font-bold text-[8px] sm:text-[10px] px-2 py-1.5 sm:px-2.5 sm:py-1.5 h-7 sm:h-8 rounded-lg border border-amber-150 uppercase tracking-wider shadow-xs flex items-center gap-1 sm:gap-1.5 cursor-pointer animate-pulse hover:animate-none group transition-all shrink-0"
                 >
-                  <CloudOff className="h-3.5 w-3.5 text-amber-500 shrink-0 group-hover:rotate-12 transition-transform" />
-                  Sincronizar Celular
+                  <CloudOff className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-amber-500 shrink-0 group-hover:rotate-12 transition-transform" />
+                  Sincronizar Nuvem
                 </Button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-[420px] rounded-2xl border-slate-200">
-                <DialogHeader>
-                  <DialogTitle className="text-xl font-bold flex items-center gap-2">
-                    <Cloud className="h-6 w-6 text-blue-600 animate-bounce" />
-                    Sincronizar com Nuvem
-                  </DialogTitle>
-                  <DialogDescription className="text-slate-500 text-xs mt-1">
-                    Guarde suas receitas e despesas na nuvem para não perder nada e acessar do seu celular ou do computador de forma sincronizada!
-                  </DialogDescription>
-                </DialogHeader>
-
-                {authError && (
-                  <div className="bg-rose-50 border border-rose-150 rounded-xl p-3 flex items-start gap-2.5 text-xs text-rose-600 animate-shake">
-                    <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                    <span>{authError}</span>
-                  </div>
-                )}
-
-                {/* Direct Help Banner for specific credentials */}
-                <div className="bg-blue-50/80 p-3 rounded-xl border border-blue-100 text-xs text-blue-700 space-y-1">
-                  <span className="font-bold flex items-center gap-1">🔑 Acesso Sincronizado:</span>
-                  <p className="text-[11px] leading-relaxed text-blue-600 font-medium">
-                    Digite o usuário <strong className="font-extrabold bg-white px-1.5 py-0.5 rounded border border-blue-200 text-blue-700">cerveja</strong> e a sua senha cadastrada no campo correspondente!
-                  </p>
-                </div>
-
-                {isIframe && (
-                  <div className="bg-amber-50/90 border border-amber-150 p-3 rounded-xl text-[11px] text-amber-800 space-y-2 leading-relaxed">
-                    <span className="font-extrabold flex items-center gap-1 text-amber-900">💡 Dica Importante para Celular:</span>
-                    <p>
-                      Para não precisar logar de novo ao atualizar a página no celular, use o link direto do app fora do chat:
-                    </p>
-                    <div className="flex gap-2">
-                      <input 
-                        type="text" 
-                        readOnly 
-                        value={window.location.href} 
-                        className="bg-white border border-amber-200 rounded px-2 py-1 text-[10px] select-all font-mono flex-1 text-slate-700"
-                        id="direct-app-link"
-                      />
-                      <Button 
-                        type="button"
-                        size="sm" 
-                        className="h-7 text-[10px] bg-amber-650 hover:bg-amber-700 text-white font-bold px-2 rounded cursor-pointer"
-                        onClick={() => {
-                          const el = document.getElementById('direct-app-link') as HTMLInputElement;
-                          if (el) {
-                            el.select();
-                            navigator.clipboard.writeText(el.value);
-                            alert('Link copiado! Abra no Safari ou Chrome do celular.');
-                          }
-                        }}
-                      >
-                        Copiar
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                <form onSubmit={handleEmailAuth} className="space-y-4">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="auth-email" className="text-[10px] font-bold uppercase text-slate-400">E-mail ou Usuário</Label>
-                    <Input
-                      id="auth-email"
-                      type="text"
-                      value={authEmail}
-                      onChange={(e) => setAuthEmail(e.target.value)}
-                      placeholder="Ex: cerveja ou seu e-mail"
-                      className="rounded-xl border-slate-250 focus-visible:ring-blue-500/25 focus-visible:border-blue-500 placeholder:text-slate-350"
-                      required
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label htmlFor="auth-password" className="text-[10px] font-bold uppercase text-slate-400">Senha</Label>
-                    <Input
-                      id="auth-password"
-                      type="password"
-                      value={authPassword}
-                      onChange={(e) => setAuthPassword(e.target.value)}
-                      placeholder="Sua senha secreta"
-                      className="rounded-xl border-slate-250 focus-visible:ring-blue-500/25 focus-visible:border-blue-500"
-                      required
-                    />
-                  </div>
-
-                  <Button
-                    type="submit"
-                    disabled={submittingAuth}
-                    className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md cursor-pointer transition-all flex items-center justify-center gap-2"
-                  >
-                    {submittingAuth ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <LogIn className="h-4 w-4" />
-                    )}
-                    Entrar e Sincronizar
-                  </Button>
-                </form>
-
-                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150 text-[10px] text-slate-500 font-semibold space-y-1 text-center">
-                  <span className="flex items-center justify-center gap-1.5"><Smartphone className="h-3.5 w-3.5 text-blue-500 shrink-0" /> Perfeito para usar no celular e PC!</span>
-                  <span className="flex items-center justify-center gap-1.5 text-emerald-600"><Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" /> Seus dados atuais migram automaticamente!</span>
-                </div>
-              </DialogContent>
-            </Dialog>
-          )}
-
-          {/* Export/Import panel */}
-          <div className="flex items-center gap-2">
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={handleExportData}
-              className="text-[10px] font-bold uppercase tracking-wider h-8 rounded-lg border-slate-200"
-            >
-              Exportar
-            </Button>
-            <div className="relative">
-              <input
-                type="file"
-                id="import-data"
-                className="hidden"
-                accept=".json"
-                onChange={handleImportData}
-              />
+              )}
+            </div>
+            
+            <div className="hidden sm:flex items-center gap-1">
               <Button 
                 variant="outline" 
                 size="sm" 
-                onClick={() => document.getElementById('import-data')?.click()}
-                className="text-[10px] font-bold uppercase tracking-wider h-8 rounded-lg border-slate-200"
+                onClick={handleExportData}
+                className="text-[10px] font-bold uppercase tracking-wider h-8 rounded-lg border-slate-200 cursor-pointer"
               >
-                Importar
+                Exportar
               </Button>
+              <div className="relative">
+                <input
+                  type="file"
+                  id="import-data"
+                  className="hidden"
+                  accept=".json"
+                  onChange={handleImportData}
+                />
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => document.getElementById('import-data')?.click()}
+                  className="text-[10px] font-bold uppercase tracking-wider h-8 rounded-lg border-slate-200 cursor-pointer"
+                >
+                  Importar
+                </Button>
+              </div>
             </div>
           </div>
         </div>
+
+        {/* Auth Sincronizar Modal */}
+        {!user && (
+          <Dialog open={authModalOpen} onOpenChange={setAuthModalOpen}>
+            <DialogContent className="sm:max-w-[420px] rounded-2xl border-slate-200 bg-white shadow-2xl p-5">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-bold flex items-center gap-2">
+                  <Cloud className="h-6 w-6 text-blue-600 animate-bounce animate-duration-1000" />
+                  Sincronizar com Nuvem
+                </DialogTitle>
+                <DialogDescription className="text-slate-500 text-xs mt-1">
+                  Guarde suas receitas e despesas na nuvem para não perder nada e acessar do seu celular ou do computador de forma sincronizada!
+                </DialogDescription>
+              </DialogHeader>
+
+              {authError && (
+                <div className="bg-rose-50 border border-rose-150 rounded-xl p-3 flex items-start gap-2.5 text-xs text-rose-600 animate-shake">
+                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <span>{authError}</span>
+                </div>
+              )}
+
+              {/* Direct Help Banner for specific credentials */}
+              <div className="bg-blue-50/80 p-3 rounded-xl border border-blue-100 text-xs text-blue-700 space-y-1">
+                <span className="font-bold flex items-center gap-1">🔑 Acesso Sincronizado:</span>
+                <p className="text-[11px] leading-relaxed text-blue-600 font-medium">
+                  Digite o usuário <strong className="font-extrabold bg-white px-1.5 py-0.5 rounded border border-blue-200 text-blue-700">cerveja</strong> e a sua senha cadastrada no campo correspondente!
+                </p>
+              </div>
+
+              {isIframe && (
+                <div className="bg-amber-50/90 border border-amber-150 p-3 rounded-xl text-[11px] text-amber-800 space-y-2 leading-relaxed">
+                  <span className="font-extrabold flex items-center gap-1 text-amber-900">💡 Dica Importante para Celular:</span>
+                  <p>
+                    Para não precisar logar de novo ao atualizar a página no celular, use o link direto do app fora do chat:
+                  </p>
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      readOnly 
+                      value={window.location.href} 
+                      className="bg-white border border-amber-200 rounded px-2 py-1 text-[10px] select-all font-mono flex-1 text-slate-700"
+                      id="direct-app-link"
+                    />
+                    <Button 
+                      type="button"
+                      size="sm" 
+                      className="h-7 text-[10px] bg-amber-600 hover:bg-amber-700 text-white font-bold px-2 rounded cursor-pointer animate-pulse hover:animate-none"
+                      onClick={() => {
+                        const el = document.getElementById('direct-app-link') as HTMLInputElement;
+                        if (el) {
+                          el.select();
+                          navigator.clipboard.writeText(el.value);
+                          alert('Link copiado! Abra no Safari ou Chrome do celular.');
+                        }
+                      }}
+                    >
+                      Copiar
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <form onSubmit={handleEmailAuth} className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="auth-email-global" className="text-[10px] font-bold uppercase text-slate-400">E-mail ou Usuário</Label>
+                  <Input
+                    id="auth-email-global"
+                    type="text"
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    placeholder="Ex: cerveja ou seu e-mail"
+                    className="rounded-xl border-slate-250 focus-visible:ring-blue-500/25 focus-visible:border-blue-500 placeholder:text-slate-350 bg-white"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="auth-password-global" className="text-[10px] font-bold uppercase text-slate-400">Senha</Label>
+                  <Input
+                    id="auth-password-global"
+                    type="password"
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    placeholder="Sua senha secreta"
+                    className="rounded-xl border-slate-250 focus-visible:ring-blue-500/25 focus-visible:border-blue-500 bg-white"
+                    required
+                  />
+                </div>
+
+                <Button
+                  type="submit"
+                  disabled={submittingAuth}
+                  className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md cursor-pointer transition-all flex items-center justify-center gap-2"
+                >
+                  {submittingAuth ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <LogIn className="h-4 w-4" />
+                  )}
+                  Entrar e Sincronizar
+                </Button>
+              </form>
+
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150 text-[10px] text-slate-500 font-semibold space-y-1 text-center">
+                <span className="flex items-center justify-center gap-1.5"><Smartphone className="h-3.5 w-3.5 text-blue-500 shrink-0" /> Perfeito para usar no celular e PC!</span>
+                <span className="flex items-center justify-center gap-1.5 text-emerald-600"><Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" /> Seus dados atuais migram automaticamente!</span>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
       </header>
 
       <main className="flex-1 max-w-7xl mx-auto w-full p-6 space-y-6">
@@ -780,7 +866,7 @@ export default function App() {
                                   <div>
                                     <p className={`font-bold text-slate-700 leading-tight ${t.paid === false ? 'text-slate-500 font-medium' : ''}`}>{t.description}</p>
                                     <div className="flex items-center gap-2 mt-0.5">
-                                      <p className="text-[10px] text-slate-400 font-medium">{format(parseISO(t.date), 'dd MMM', { locale: ptBR })}</p>
+                                      <p className="text-[10px] text-slate-400 font-medium">{format(safeParseDate(t.date), 'dd MMM', { locale: ptBR })}</p>
                                       <span className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider ${
                                         t.paid === false 
                                           ? 'bg-rose-50 text-rose-600 border border-rose-100' 
@@ -1022,7 +1108,7 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
   const [type, setType] = useState<TransactionType>(initialData?.type || 'expense');
   const [amount, setAmount] = useState(initialData?.amount.toString() || '');
   const [description, setDescription] = useState(initialData?.description || '');
-  const [date, setDate] = useState(initialData ? format(parseISO(initialData.date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'));
+  const [date, setDate] = useState(initialData ? format(safeParseDate(initialData.date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'));
   const [paid, setPaid] = useState<boolean>(initialData ? initialData.paid !== false : true);
   const [periodicity, setPeriodicity] = useState<'monthly' | 'yearly'>(initialData?.periodicity || 'monthly');
   const [isRecurring, setIsRecurring] = useState(false);

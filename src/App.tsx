@@ -4,7 +4,8 @@ import {
 } from 'recharts';
 import { 
   Wallet, TrendingUp, Plus, Trash2, Calendar, 
-  ChevronLeft, ChevronRight, Receipt, History, Pencil
+  ChevronLeft, ChevronRight, Receipt, History, Pencil,
+  Cloud, CloudOff, Loader2, LogIn, LogOut, Check, Info, AlertCircle, RefreshCw, Smartphone
 } from 'lucide-react';
 import { format, subMonths, addMonths, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -21,9 +22,20 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { 
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger 
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger 
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+
+import { auth, db } from './lib/firebase';
+import { 
+  collection, doc, setDoc, deleteDoc, updateDoc, 
+  onSnapshot, query, writeBatch 
+} from 'firebase/firestore';
+import { 
+  onAuthStateChanged, signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, User, signOut,
+  GoogleAuthProvider, signInWithPopup
+} from 'firebase/auth';
 
 const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
@@ -32,31 +44,115 @@ export default function App() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
   const [periodicityFilter, setPeriodicityFilter] = useState<'all' | 'monthly' | 'yearly'>('all');
+
+  // Authentication & Cloud Sync states
+  const [user, setUser] = useState<User | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authError, setAuthError] = useState('');
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [submittingAuth, setSubmittingAuth] = useState(false);
   
-  // Load data from LocalStorage on mount
+  // Authenticated state & Real-time Sync
   useEffect(() => {
-    const savedTransactions = localStorage.getItem('financas_cadal_transactions');
+    // Sync current month state from LocalStorage on mount
     const savedMonth = localStorage.getItem('financas_cadal_month');
-    
     if (savedMonth) {
       setCurrentMonth(new Date(savedMonth));
     }
 
-    if (savedTransactions) {
-      setTransactions(JSON.parse(savedTransactions));
-    }
-    
-    setLoading(false);
+    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
+      
+      if (currentUser) {
+        setLoading(true);
+        setIsSyncing(true);
+        
+        // 1. Check & Migrate Any Local Transactions to Cloud Automatically
+        const savedLocal = localStorage.getItem('financas_cadal_transactions');
+        if (savedLocal) {
+          try {
+            const localTrxs = JSON.parse(savedLocal) as FinanceTransaction[];
+            if (localTrxs.length > 0) {
+              const batch = writeBatch(db);
+              localTrxs.forEach((t) => {
+                const docRef = doc(db, 'users', currentUser.uid, 'transactions', t.id);
+                // Map local schema to valid transaction matching firestore.rules
+                batch.set(docRef, {
+                  userId: currentUser.uid,
+                  type: t.type,
+                  amount: t.amount,
+                  category: t.category || 'Geral',
+                  description: t.description || '',
+                  date: t.date || new Date().toISOString(),
+                  month: t.month || format(new Date(), 'yyyy-MM'),
+                  createdAt: t.createdAt || new Date().toISOString(),
+                  paid: t.paid !== undefined ? t.paid : true,
+                  periodicity: t.periodicity || 'monthly'
+                });
+              });
+              await batch.commit();
+              // Clear localStorage for transactions after migration to avoid duplicate operations
+              localStorage.removeItem('financas_cadal_transactions');
+            }
+          } catch (migrateErr) {
+            console.error("Migration error:", migrateErr);
+          }
+        }
+
+        // 2. Subscribe to Firestore Real-time Transactions from '/users/{userId}/transactions'
+        const q = query(collection(db, 'users', currentUser.uid, 'transactions'));
+        const unsubscribeFirestore = onSnapshot(q, (snapshot) => {
+          const cloudTransactions: FinanceTransaction[] = [];
+          snapshot.forEach((doc) => {
+            cloudTransactions.push({ id: doc.id, ...doc.data() } as FinanceTransaction);
+          });
+          // Sort by date descending
+          cloudTransactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          setTransactions(cloudTransactions);
+          setLoading(false);
+          setIsSyncing(false);
+        }, (err) => {
+          console.error("Firestore snapshot error:", err);
+          setLoading(false);
+          setIsSyncing(false);
+        });
+
+        return () => {
+          unsubscribeFirestore();
+        };
+      } else {
+        // No user authenticated: fallback to LocalStorage
+        const savedTransactions = localStorage.getItem('financas_cadal_transactions');
+        if (savedTransactions) {
+          try {
+            setTransactions(JSON.parse(savedTransactions));
+          } catch (err) {
+            setTransactions([]);
+          }
+        } else {
+          setTransactions([]);
+        }
+        setLoading(false);
+        setIsSyncing(false);
+      }
+    });
+
+    return () => {
+      unsubscribeAuth();
+    };
   }, []);
 
-  // Save transactions to LocalStorage
+  // Save guest transactions only when not authenticated
   useEffect(() => {
-    if (!loading) {
+    if (!loading && !user) {
       localStorage.setItem('financas_cadal_transactions', JSON.stringify(transactions));
     }
-  }, [transactions, loading]);
+  }, [transactions, loading, user]);
 
-  // Save current month to LocalStorage
+  // Save current month to LocalStorage (works for both guests & authenticated users)
   useEffect(() => {
     if (!loading) {
       localStorage.setItem('financas_cadal_month', currentMonth.toISOString());
@@ -80,17 +176,47 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  const handleImportData = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportData = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const data = JSON.parse(event.target?.result as string);
         if (data.transactions) {
           if (confirm('Isso irá substituir todos os seus dados atuais. Deseja continuar?')) {
-            setTransactions(data.transactions);
+            if (user) {
+              setLoading(true);
+              try {
+                // Delete existing ones first or write new ones in batch
+                const batch = writeBatch(db);
+                // Also create/import new ones
+                data.transactions.forEach((t: any) => {
+                  const docRef = doc(db, 'users', user.uid, 'transactions', t.id || Math.random().toString(36).substr(2, 9));
+                  batch.set(docRef, {
+                    userId: user.uid,
+                    type: t.type,
+                    amount: t.amount,
+                    category: t.category || 'Geral',
+                    description: t.description || '',
+                    date: t.date || new Date().toISOString(),
+                    month: t.month || format(new Date(), 'yyyy-MM'),
+                    createdAt: t.createdAt || new Date().toISOString(),
+                    paid: t.paid !== undefined ? t.paid : true,
+                    periodicity: t.periodicity || 'monthly'
+                  });
+                });
+                await batch.commit();
+              } catch (migrateErr) {
+                console.error("Import cloud write error:", migrateErr);
+                alert("Erro ao importar dados na nuvem.");
+              } finally {
+                setLoading(false);
+              }
+            } else {
+              setTransactions(data.transactions);
+            }
           }
         } else {
           alert('Arquivo de backup inválido.');
@@ -102,11 +228,12 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  const handleAddTransaction = (data: Partial<FinanceTransaction>) => {
+  const handleAddTransaction = async (data: Partial<FinanceTransaction>) => {
     const trxDate = data.date ? parseISO(data.date) : new Date();
+    const newId = Math.random().toString(36).substr(2, 9);
     const newTransaction: FinanceTransaction = {
-      id: Math.random().toString(36).substr(2, 9),
-      userId: 'local-user',
+      id: newId,
+      userId: user ? user.uid : 'local-user',
       type: data.type as TransactionType,
       amount: data.amount || 0,
       description: data.description || '',
@@ -117,28 +244,109 @@ export default function App() {
       periodicity: data.periodicity || 'monthly',
       createdAt: new Date().toISOString()
     };
-    setTransactions(prev => [newTransaction, ...prev]);
-  };
 
-  const handleDeleteTransaction = (id: string) => {
-    setTransactions(prev => prev.filter(t => t.id !== id));
-  };
-
-  const handleUpdateTransaction = (id: string, data: Partial<FinanceTransaction>) => {
-    setTransactions(prev => prev.map(t => {
-      if (t.id === id) {
-        const updated = { ...t, ...data };
-        if (data.date) {
-          updated.month = format(parseISO(data.date), 'yyyy-MM');
-        }
-        return updated;
+    if (user) {
+      try {
+        await setDoc(doc(db, 'users', user.uid, 'transactions', newId), newTransaction);
+      } catch (err) {
+        console.error("Error creating document in Firestore:", err);
       }
-      return t;
-    }));
+    } else {
+      setTransactions(prev => [newTransaction, ...prev]);
+    }
+  };
+
+  const handleDeleteTransaction = async (id: string) => {
+    if (user) {
+      try {
+        await deleteDoc(doc(db, 'users', user.uid, 'transactions', id));
+      } catch (err) {
+        console.error("Error deleting document from Firestore:", err);
+      }
+    } else {
+      setTransactions(prev => prev.filter(t => t.id !== id));
+    }
+  };
+
+  const handleUpdateTransaction = async (id: string, data: Partial<FinanceTransaction>) => {
+    const updatedData: Record<string, any> = { ...data };
+    if (data.date) {
+      updatedData.month = format(parseISO(data.date), 'yyyy-MM');
+    }
+
+    if (user) {
+      try {
+        await setDoc(doc(db, 'users', user.uid, 'transactions', id), updatedData, { merge: true });
+      } catch (err) {
+        console.error("Error updating document in Firestore:", err);
+      }
+    } else {
+      setTransactions(prev => prev.map(t => {
+        if (t.id === id) {
+          const updated = { ...t, ...data };
+          if (data.date) {
+            updated.month = format(parseISO(data.date), 'yyyy-MM');
+          }
+          return updated;
+        }
+        return t;
+      }));
+    }
   };
 
   const changeMonth = (offset: number) => {
     setCurrentMonth(prev => offset > 0 ? addMonths(prev, 1) : subMonths(prev, 1));
+  };
+
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    if (!authEmail || !authPassword) {
+      setAuthError('Preencha os campos de E-mail e Senha.');
+      return;
+    }
+    if (authPassword.length < 6) {
+      setAuthError('A senha precisa conter no mínimo 6 caracteres.');
+      return;
+    }
+    setSubmittingAuth(true);
+    try {
+      if (authMode === 'login') {
+        await signInWithEmailAndPassword(auth, authEmail, authPassword);
+      } else {
+        await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+      }
+      setAuthModalOpen(false);
+      setAuthEmail('');
+      setAuthPassword('');
+    } catch (err: any) {
+      console.error("Auth error:", err);
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        setAuthError('E-mail ou senha incorretos.');
+      } else if (err.code === 'auth/email-already-in-use') {
+        setAuthError('Este endereço de e-mail já está sendo utilizado.');
+      } else if (err.code === 'auth/invalid-email') {
+        setAuthError('Modelo de e-mail inválido.');
+      } else if (err.code === 'auth/weak-password') {
+        setAuthError('A senha precisa conter no mínimo 6 caracteres.');
+      } else {
+        setAuthError('Erro na autenticação. Verifique sua conexão.');
+      }
+    } finally {
+      setSubmittingAuth(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    if (confirm('Deseja realmente sair da nuvem? Suas informações continuam salvas em segurança para acesso posterior.')) {
+      setLoading(true);
+      try {
+        await signOut(auth);
+      } catch (err) {
+        console.error("Logout error:", err);
+        setLoading(false);
+      }
+    }
   };
 
   // Filter transactions for current month
@@ -186,44 +394,207 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans flex flex-col">
       {/* Header */}
-      <header className="h-16 bg-white border-b border-slate-200 sticky top-0 z-10 px-8 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-sm">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 px-4 sm:px-8 py-3 flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-sm shrink-0">
             <Wallet className="h-6 w-6" />
           </div>
           <div>
             <h1 className="text-xl font-bold tracking-tight text-slate-800 font-heading">Finanças Casal</h1>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              Gestão Mensal • {format(currentMonth, 'MMMM yyyy', { locale: ptBR })}
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+              <span>Gestão Mensal</span>
+              <span>•</span>
+              <span className="text-slate-500 font-semibold">{format(currentMonth, 'MMMM yyyy', { locale: ptBR })}</span>
             </p>
           </div>
         </div>
         
-        <div className="flex items-center gap-6">
-          <div className="hidden md:flex flex-col items-end mr-4">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-tighter">Saldo Previsto</span>
-            <span className={`font-bold text-xl font-heading ${balance >= 0 ? 'text-blue-600' : 'text-rose-600'}`}>
+        <div className="flex flex-wrap items-center justify-between md:justify-end gap-3 sm:gap-4 w-full md:w-auto">
+          {/* Saldo previsto - responsive hiding/showing */}
+          <div className="flex flex-col items-end mr-1 sm:mr-3">
+            <span className="text-[9px] font-bold text-slate-450 uppercase tracking-tight">Saldo Previsto</span>
+            <span className={`font-bold text-lg leading-tight font-heading ${balance >= 0 ? 'text-blue-600' : 'text-rose-600'}`}>
               R$ {balance.toLocaleString('pt-BR')}
             </span>
           </div>
 
-          <div className="flex items-center bg-slate-100 rounded-xl p-1 shadow-inner border border-slate-200">
-            <Button size="icon" variant="ghost" onClick={() => changeMonth(-1)} className="h-8 w-8 hover:bg-white hover:shadow-sm transition-all rounded-lg">
+          {/* Month selector controls */}
+          <div className="flex items-center bg-slate-100 rounded-xl p-0.5 shadow-inner border border-slate-200">
+            <Button size="icon" variant="ghost" onClick={() => changeMonth(-1)} className="h-7 w-7 sm:h-8 sm:w-8 hover:bg-white hover:shadow-sm transition-all rounded-lg">
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <span className="px-3 text-xs font-bold min-w-[110px] text-center uppercase tracking-tight text-slate-600">
+            <span className="px-1.5 sm:px-3 text-[10px] sm:text-xs font-bold min-w-[85px] sm:min-w-[110px] text-center uppercase tracking-tight text-slate-650">
               {format(currentMonth, 'MMM yyyy', { locale: ptBR })}
             </span>
-            <Button size="icon" variant="ghost" onClick={() => changeMonth(1)} className="h-8 w-8 hover:bg-white hover:shadow-sm transition-all rounded-lg">
+            <Button size="icon" variant="ghost" onClick={() => changeMonth(1)} className="h-7 w-7 sm:h-8 sm:w-8 hover:bg-white hover:shadow-sm transition-all rounded-lg">
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
           
-          <div className="bg-emerald-50 text-emerald-700 font-bold text-[10px] px-3 py-1.5 rounded-lg border border-emerald-100 uppercase tracking-wider shadow-sm flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            Local
-          </div>
+          {/* Cloud Synchronization and Account Sync Component */}
+          {user ? (
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-150 p-1 rounded-xl">
+              <div className="bg-emerald-50 text-emerald-700 font-bold text-[9px] px-2.5 py-1.5 rounded-lg border border-emerald-100 uppercase tracking-wider shadow-xs flex items-center gap-1.5">
+                <Cloud className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                <span className="hidden sm:inline">Sincronizado</span>
+                <span className="sm:hidden">Nuvem</span>
+              </div>
+              <div className="hidden lg:flex flex-col text-right px-1">
+                <span className="text-[9px] font-bold text-slate-450 max-w-[110px] truncate" title={user.email || ''}>
+                  {user.displayName || user.email}
+                </span>
+              </div>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={handleLogout} 
+                title="Sair da Conta (Nuvem)"
+                className="h-7 w-7 sm:h-8 sm:w-8 hover:bg-white hover:shadow-xs rounded-lg text-slate-400 hover:text-rose-600 transition-all cursor-pointer"
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : (
+            <Dialog open={authModalOpen} onOpenChange={setAuthModalOpen}>
+              <DialogTrigger asChild>
+                <Button 
+                  variant="outline"
+                  size="sm"
+                  className="bg-amber-50 text-amber-700 hover:bg-amber-100 font-bold text-[10px] px-2.5 py-1.5 h-8 rounded-lg border border-amber-150 uppercase tracking-wider shadow-xs flex items-center gap-1.5 cursor-pointer animate-pulse hover:animate-none group transition-all shrink-0"
+                >
+                  <CloudOff className="h-3.5 w-3.5 text-amber-500 shrink-0 group-hover:rotate-12 transition-transform" />
+                  Sincronizar Celular
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[420px] rounded-2xl border-slate-200">
+                <DialogHeader>
+                  <DialogTitle className="text-xl font-bold flex items-center gap-2">
+                    <Cloud className="h-6 w-6 text-blue-600 animate-bounce" />
+                    Sincronizar com Nuvem
+                  </DialogTitle>
+                  <DialogDescription className="text-slate-500 text-xs mt-1">
+                    Guarde suas receitas e despesas na nuvem para não perder nada e acessar do seu celular ou do computador de forma sincronizada!
+                  </DialogDescription>
+                </DialogHeader>
 
+                {authError && (
+                  <div className="bg-rose-50 border border-rose-150 rounded-xl p-3 flex items-start gap-2.5 text-xs text-rose-600 animate-shake">
+                    <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                    <span>{authError}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleEmailAuth} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="auth-email" className="text-[10px] font-bold uppercase text-slate-400">E-mail</Label>
+                    <Input
+                      id="auth-email"
+                      type="email"
+                      value={authEmail}
+                      onChange={(e) => setAuthEmail(e.target.value)}
+                      placeholder="exemplo@email.com"
+                      className="rounded-xl border-slate-250 focus-visible:ring-blue-500/25 focus-visible:border-blue-500 placeholder:text-slate-350"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="auth-password" className="text-[10px] font-bold uppercase text-slate-400">Senha (mínimo 6 caracteres)</Label>
+                    <Input
+                      id="auth-password"
+                      type="password"
+                      value={authPassword}
+                      onChange={(e) => setAuthPassword(e.target.value)}
+                      placeholder="******"
+                      className="rounded-xl border-slate-250 focus-visible:ring-blue-500/25 focus-visible:border-blue-500"
+                      required
+                    />
+                  </div>
+
+                  <Button
+                    type="submit"
+                    disabled={submittingAuth}
+                    className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md cursor-pointer transition-all flex items-center justify-center gap-2"
+                  >
+                    {submittingAuth ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <LogIn className="h-4 w-4" />
+                    )}
+                    {authMode === 'login' ? 'Entrar com E-mail' : 'Criar minha Conta'}
+                  </Button>
+                </form>
+
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthError('');
+                      setAuthMode(authMode === 'login' ? 'register' : 'login');
+                    }}
+                    className="text-xs text-blue-600 hover:underline font-semibold cursor-pointer"
+                  >
+                    {authMode === 'login' 
+                      ? 'Primeira vez aqui? Crie sua conta grátis' 
+                      : 'Já tem uma conta criada? Faça login'}
+                  </button>
+                </div>
+
+                <div className="relative flex items-center justify-center border-t border-slate-100 pt-4 mt-2">
+                  <span className="absolute bg-white px-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Ou use sua Conta</span>
+                </div>
+
+                {/* Social Sign In (Google) */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={submittingAuth}
+                  onClick={async () => {
+                    setAuthError('');
+                    setSubmittingAuth(true);
+                    try {
+                      const provider = new GoogleAuthProvider();
+                      await signInWithPopup(auth, provider);
+                      setAuthModalOpen(false);
+                    } catch (err: any) {
+                      console.error("Google Auth error:", err);
+                      setAuthError('Falha ao autenticar com o Google. Se estiver no celular, tente usar o e-mail e senha acima!');
+                    } finally {
+                      setSubmittingAuth(false);
+                    }
+                  }}
+                  className="w-full h-11 border-slate-200 hover:bg-slate-50 font-bold rounded-xl cursor-pointer transition-all flex items-center justify-center gap-2.5"
+                >
+                  <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24">
+                    <path
+                      fill="#4285F4"
+                      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v3.91h6.63c-.29 1.5-.14 3.01-1.01 4.13v3.42h6.63c3.88-3.58 6.13-8.86 6.13-14.9a12.5 12.5 0 0 0-.01-.49z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 24c3.24 0 5.97-1.08 7.96-2.91l-6.2-4.82c-1.72 1.15-3.92 1.83-6.23 1.83-4.79 0-8.84-3.24-10.29-7.6H1.05v4.96C4.04 21.05 7.8 24 12 24z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M1.71 10.5c-.37-1.11-.58-2.29-.58-3.5s.21-2.39.58-3.5V2.04H1.05A12.004 12.004 0 0 0 0 12c0 3.24.81 6.3 2.23 8.96L1.71 10.5z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.96 1.19 15.24 0 12 0 7.8 0 4.04 2.95 1.05 7.04l4.96 4.96c1.45-4.36 5.5-7.6 10.29-7.6z"
+                    />
+                  </svg>
+                  Google Account
+                </Button>
+
+                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150 text-[10px] text-slate-500 font-semibold space-y-1">
+                  <span className="flex items-center gap-1.5"><Smartphone className="h-3.5 w-3.5 text-blue-500 shrink-0" /> Ideal para usar no celular e computador juntos!</span>
+                  <span className="flex items-center gap-1.5"><Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" /> Seus dados locais são migrados de forma automática!</span>
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
+
+          {/* Export/Import panel */}
           <div className="flex items-center gap-2">
             <Button 
               variant="outline" 

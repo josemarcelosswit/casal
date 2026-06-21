@@ -10,6 +10,7 @@ export interface FinanceTransaction {
   date: string; // ISO date
   month: string; // YYYY-MM
   createdAt: string;
+  paid?: boolean;
 }
 
 export interface UserProfile {

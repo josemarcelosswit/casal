@@ -112,6 +112,7 @@ export default function App() {
       category: 'Geral',
       date: data.date || new Date().toISOString(),
       month: format(trxDate, 'yyyy-MM'),
+      paid: data.paid !== undefined ? data.paid : true,
       createdAt: new Date().toISOString()
     };
     setTransactions(prev => [newTransaction, ...prev]);
@@ -145,10 +146,15 @@ export default function App() {
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const totals = filteredTransactions.reduce((acc, curr) => {
-    if (curr.type === 'income') acc.income += curr.amount;
-    else acc.expense += curr.amount;
+    if (curr.type === 'income') {
+      acc.income += curr.amount;
+      if (curr.paid === false) acc.unpaidIncome += curr.amount;
+    } else {
+      acc.expense += curr.amount;
+      if (curr.paid === false) acc.unpaidExpense += curr.amount;
+    }
     return acc;
-  }, { income: 0, expense: 0 });
+  }, { income: 0, expense: 0, unpaidIncome: 0, unpaidExpense: 0 });
 
   const balance = totals.income - totals.expense;
 
@@ -241,22 +247,26 @@ export default function App() {
             label="Renda Total" 
             amount={totals.income} 
             color="emerald" 
+            subtext={totals.unpaidIncome > 0 ? `Pendente: R$ ${totals.unpaidIncome.toLocaleString('pt-BR')}` : 'Tudo recebido! ✅'}
           />
           <KPICard 
             label="Despesas Fixas" 
             amount={totals.expense} 
             color="slate" 
+            subtext={totals.unpaidExpense > 0 ? `A pagar: R$ ${totals.unpaidExpense.toLocaleString('pt-BR')}` : 'Tudo pago! 🎉'}
           />
           <KPICard 
             label="Saldo Restante" 
             amount={balance} 
             color={balance >= 0 ? "emerald" : "amber"} 
+            subtext={totals.unpaidExpense > 0 ? `Falta quitar: R$ ${totals.unpaidExpense.toLocaleString('pt-BR')}` : 'Contas quitadas'}
           />
           <KPICard 
             label="Poupança" 
             amount={totals.income > 0 ? ((balance / totals.income) * 100) : 0} 
             color="blue" 
             isPercent
+            subtext={balance > 0 ? 'Economia saudável' : 'Orçamento apertado'}
           />
         </section>
 
@@ -318,13 +328,41 @@ export default function App() {
                             <tr key={t.id} className="group hover:bg-slate-50 transition-colors">
                               <td className="py-3 px-2">
                                 <div className="flex items-center gap-3">
+                                  {/* Clickable Circle Checklist Toggle */}
+                                  <button
+                                    onClick={() => handleUpdateTransaction(t.id, { paid: t.paid === false ? true : false })}
+                                    className="flex-shrink-0 focus:outline-none transition-all active:scale-90"
+                                    title={t.paid === false ? "Marcar como Pago" : "Marcar como Não Pago"}
+                                  >
+                                    {t.paid === false ? (
+                                      <div className="w-5 h-5 rounded-full border-2 border-rose-400 bg-rose-50 hover:bg-rose-100 flex items-center justify-center text-rose-500 transition-colors cursor-pointer">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+                                      </div>
+                                    ) : (
+                                      <div className="w-5 h-5 rounded-full border-2 border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600 flex items-center justify-center transition-colors cursor-pointer">
+                                        <svg className="w-3.5 h-3.5 stroke-[3]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                        </svg>
+                                      </div>
+                                    )}
+                                  </button>
+
                                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${t.type === 'income' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-600'}`}>
                                     {t.type === 'income' ? <Plus className="h-4 w-4" /> : <div className="w-1.5 h-1.5 rounded-full bg-current" />}
                                   </div>
                                   <div>
-                                    <p className="font-bold text-slate-700 leading-tight">{t.description}</p>
-                                    <div className="flex items-center gap-2">
+                                    <p className={`font-bold text-slate-700 leading-tight ${t.paid === false ? 'text-slate-500 font-medium' : ''}`}>{t.description}</p>
+                                    <div className="flex items-center gap-2 mt-0.5">
                                       <p className="text-[10px] text-slate-400 font-medium">{format(parseISO(t.date), 'dd MMM', { locale: ptBR })}</p>
+                                      <span className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                                        t.paid === false 
+                                          ? 'bg-rose-50 text-rose-600 border border-rose-100' 
+                                          : 'bg-emerald-50 text-emerald-600 border border-emerald-100'
+                                      }`}>
+                                        {t.type === 'income' 
+                                          ? (t.paid === false ? 'A receber' : 'Recebido') 
+                                          : (t.paid === false ? 'Não Pago' : 'Pago')}
+                                      </span>
                                     </div>
                                   </div>
                                 </div>
@@ -402,7 +440,7 @@ export default function App() {
   );
 }
 
-function KPICard({ label, amount, color, isPercent = false }: { label: string, amount: number, color: 'emerald' | 'slate' | 'amber' | 'blue', isPercent?: boolean }) {
+function KPICard({ label, amount, color, isPercent = false, subtext }: { label: string, amount: number, color: 'emerald' | 'slate' | 'amber' | 'blue', isPercent?: boolean, subtext?: string }) {
   const textColors = {
     emerald: 'text-emerald-600',
     slate: 'text-slate-800',
@@ -411,22 +449,29 @@ function KPICard({ label, amount, color, isPercent = false }: { label: string, a
   };
 
   return (
-    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-slate-300 transition-all">
-      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{label}</p>
-      <div className="flex items-end gap-2">
-        <p className={`text-2xl font-bold font-heading tabular-nums leading-none ${textColors[color]}`}>
-          {isPercent ? `${amount.toFixed(0)}%` : `R$ ${amount.toLocaleString('pt-BR')}`}
-        </p>
-        {isPercent && (
-           <div className="flex-1 h-2 bg-slate-50 border border-slate-100 rounded-full overflow-hidden mb-1">
-            <motion.div 
-              className="h-full bg-blue-500 rounded-full" 
-              initial={{ width: 0 }}
-              animate={{ width: `${Math.min(100, Math.max(0, amount))}%` }}
-            />
-          </div>
-        )}
+    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-slate-300 transition-all flex flex-col justify-between min-h-[105px]">
+      <div>
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{label}</p>
+        <div className="flex items-end gap-2">
+          <p className={`text-2xl font-bold font-heading tabular-nums leading-none ${textColors[color]}`}>
+            {isPercent ? `${amount.toFixed(0)}%` : `R$ ${amount.toLocaleString('pt-BR')}`}
+          </p>
+          {isPercent && (
+             <div className="flex-1 h-2 bg-slate-50 border border-slate-100 rounded-full overflow-hidden mb-1">
+              <motion.div 
+                className="h-full bg-blue-500 rounded-full" 
+                initial={{ width: 0 }}
+                animate={{ width: `${Math.min(100, Math.max(0, amount))}%` }}
+              />
+            </div>
+          )}
+        </div>
       </div>
+      {subtext && (
+        <span className="text-[10px] font-semibold text-slate-400 mt-2 block border-t border-slate-50 pt-1.5">
+          {subtext}
+        </span>
+      )}
     </div>
   );
 }
@@ -512,6 +557,7 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
   const [amount, setAmount] = useState(initialData?.amount.toString() || '');
   const [description, setDescription] = useState(initialData?.description || '');
   const [date, setDate] = useState(initialData ? format(parseISO(initialData.date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'));
+  const [paid, setPaid] = useState<boolean>(initialData ? initialData.paid !== false : true);
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringMonths, setRecurringMonths] = useState('1');
 
@@ -519,6 +565,7 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
     if (!initialData) {
       setAmount('');
       setDescription('');
+      setPaid(true);
       setIsRecurring(false);
       setRecurringMonths('1');
     }
@@ -542,7 +589,8 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
           type,
           amount: parsedAmount,
           description: `${description} (${i + 1}/${recurringMonths})`,
-          date: nextDate.toISOString()
+          date: nextDate.toISOString(),
+          paid: paid
         });
       }
     } else {
@@ -550,7 +598,8 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
         type,
         amount: parsedAmount,
         description,
-        date: new Date(date + 'T12:00:00').toISOString()
+        date: new Date(date + 'T12:00:00').toISOString(),
+        paid: paid
       });
     }
     
@@ -615,6 +664,41 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
               className="rounded-xl border-slate-200 h-11"
             />
           </div>
+        </div>
+
+        {/* Premium Status Toggle Switch */}
+        <div className="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-150 rounded-xl">
+          <div className="flex flex-col">
+            <span className="text-xs font-bold text-slate-700">
+              {type === 'income' ? 'Valor já recebido?' : 'Valor já pago?'}
+            </span>
+            <span className="text-[10px] text-slate-400 font-medium">
+              {type === 'income' 
+                ? 'Marcar se a receita já foi recebida' 
+                : 'Marcar se a conta já foi quitada'}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPaid(!paid)}
+            className={`w-12 h-7 rounded-full transition-colors relative p-1 duration-200 cursor-pointer ${
+              paid ? 'bg-emerald-500' : 'bg-slate-300'
+            }`}
+          >
+            <div
+              className={`w-5 h-5 bg-white rounded-full shadow-sm flex items-center justify-center transition-transform duration-200 transform ${
+                paid ? 'translate-x-[20px]' : 'translate-x-0'
+              }`}
+            >
+              {paid ? (
+                <svg className="w-3.5 h-3.5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                </svg>
+              ) : (
+                <div className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+              )}
+            </div>
+          </button>
         </div>
 
         {!initialData && (

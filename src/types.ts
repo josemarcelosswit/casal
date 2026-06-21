@@ -11,6 +11,7 @@ export interface FinanceTransaction {
   month: string; // YYYY-MM
   createdAt: string;
   paid?: boolean;
+  periodicity?: 'monthly' | 'yearly';
 }
 
 export interface UserProfile {

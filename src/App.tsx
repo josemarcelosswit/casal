@@ -31,6 +31,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
+  const [periodicityFilter, setPeriodicityFilter] = useState<'all' | 'monthly' | 'yearly'>('all');
   
   // Load data from LocalStorage on mount
   useEffect(() => {
@@ -113,6 +114,7 @@ export default function App() {
       date: data.date || new Date().toISOString(),
       month: format(trxDate, 'yyyy-MM'),
       paid: data.paid !== undefined ? data.paid : true,
+      periodicity: data.periodicity || 'monthly',
       createdAt: new Date().toISOString()
     };
     setTransactions(prev => [newTransaction, ...prev]);
@@ -152,11 +154,23 @@ export default function App() {
     } else {
       acc.expense += curr.amount;
       if (curr.paid === false) acc.unpaidExpense += curr.amount;
+      if (curr.periodicity === 'yearly') {
+        acc.yearlyExpense += curr.amount;
+      } else {
+        acc.monthlyExpense += curr.amount;
+      }
     }
     return acc;
-  }, { income: 0, expense: 0, unpaidIncome: 0, unpaidExpense: 0 });
+  }, { income: 0, expense: 0, unpaidIncome: 0, unpaidExpense: 0, monthlyExpense: 0, yearlyExpense: 0 });
 
   const balance = totals.income - totals.expense;
+
+  const displayFilteredTransactions = filteredTransactions.filter(t => {
+    if (periodicityFilter === 'all') return true;
+    if (periodicityFilter === 'monthly') return t.periodicity !== 'yearly';
+    if (periodicityFilter === 'yearly') return t.periodicity === 'yearly';
+    return true;
+  });
 
   if (loading) {
     return (
@@ -253,7 +267,7 @@ export default function App() {
             label="Despesas Fixas" 
             amount={totals.expense} 
             color="slate" 
-            subtext={totals.unpaidExpense > 0 ? `A pagar: R$ ${totals.unpaidExpense.toLocaleString('pt-BR')}` : 'Tudo pago! 🎉'}
+            subtext={`Mensais: R$ ${totals.monthlyExpense.toLocaleString('pt-BR')} • Anuais: R$ ${totals.yearlyExpense.toLocaleString('pt-BR')}`}
           />
           <KPICard 
             label="Saldo Restante" 
@@ -314,6 +328,51 @@ export default function App() {
                 </div>
 
                 <div className="p-4 flex-1">
+                  {/* Filtro de Periodicidade de Dívida */}
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-slate-100 pb-4 mb-4 gap-3">
+                    <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 self-start shadow-inner">
+                      <button
+                        type="button"
+                        onClick={() => setPeriodicityFilter('all')}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                          periodicityFilter === 'all' 
+                            ? 'bg-white text-blue-600 shadow-xs' 
+                            : 'text-slate-500 hover:text-slate-900'
+                        }`}
+                      >
+                        Todos ({filteredTransactions.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPeriodicityFilter('monthly')}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                          periodicityFilter === 'monthly' 
+                            ? 'bg-white text-blue-600 shadow-xs' 
+                            : 'text-slate-500 hover:text-slate-900'
+                        }`}
+                      >
+                        Mensais ({filteredTransactions.filter(t => t.periodicity !== 'yearly').length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPeriodicityFilter('yearly')}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                          periodicityFilter === 'yearly' 
+                            ? 'bg-white text-blue-600 shadow-xs' 
+                            : 'text-slate-500 hover:text-slate-900'
+                        }`}
+                      >
+                        Anuais ({filteredTransactions.filter(t => t.periodicity === 'yearly').length})
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-4 text-xs font-semibold text-slate-500 px-1">
+                      <span>Mensais: <strong className="text-slate-700 font-bold">R$ {totals.monthlyExpense.toLocaleString('pt-BR')}</strong></span>
+                      <span className="text-slate-300">|</span>
+                      <span>Anuais: <strong className="text-purple-600 font-bold">R$ {totals.yearlyExpense.toLocaleString('pt-BR')}</strong></span>
+                    </div>
+                  </div>
+
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
@@ -323,8 +382,8 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-50">
-                        {filteredTransactions.length > 0 ? (
-                          filteredTransactions.map((t) => (
+                        {displayFilteredTransactions.length > 0 ? (
+                          displayFilteredTransactions.map((t) => (
                             <tr key={t.id} className="group hover:bg-slate-50 transition-colors">
                               <td className="py-3 px-2">
                                 <div className="flex items-center gap-3">
@@ -362,6 +421,13 @@ export default function App() {
                                         {t.type === 'income' 
                                           ? (t.paid === false ? 'A receber' : 'Recebido') 
                                           : (t.paid === false ? 'Não Pago' : 'Pago')}
+                                      </span>
+                                      <span className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                                        t.periodicity === 'yearly'
+                                          ? 'bg-purple-50 text-purple-600 border border-purple-100'
+                                          : 'bg-slate-100 text-slate-600 border border-slate-150'
+                                      }`}>
+                                        {t.periodicity === 'yearly' ? 'Anual' : 'Mensal'}
                                       </span>
                                     </div>
                                   </div>
@@ -406,18 +472,50 @@ export default function App() {
           </div>
 
           <div className="col-span-12 lg:col-span-4 flex flex-col gap-6">
-            <Card className="shadow-sm border-slate-200 rounded-2xl md:h-[350px] flex flex-col">
+            <Card className="shadow-sm border-slate-200 rounded-2xl flex flex-col">
               <CardHeader className="pb-2">
                 <CardTitle className="text-lg font-bold flex items-center gap-2 font-heading">
                   <TrendingUp className="h-5 w-5 text-indigo-500" />
                   Visualização Financeira
                 </CardTitle>
               </CardHeader>
-              <CardContent className="flex-1 flex flex-col px-6">
-                <div className="flex items-end justify-around gap-6 pb-4 mt-6 flex-1">
+              <CardContent className="flex-1 flex flex-col px-6 pb-6">
+                <div className="flex items-end justify-around gap-6 pb-4 mt-6 h-40">
                   <BarIndicator label="Receita" value={totals.income} total={Math.max(totals.income, totals.expense)} color="bg-emerald-500" />
                   <BarIndicator label="Fixos" value={totals.expense} total={Math.max(totals.income, totals.expense)} color="bg-slate-300" />
                   <BarIndicator label="Sobra" value={Math.max(0, balance)} total={Math.max(totals.income, totals.expense)} color="bg-blue-500" />
+                </div>
+
+                <div className="border-t border-slate-100 pt-4 mt-4 text-xs">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-3">Divisão das despesas</span>
+                  
+                  <div className="space-y-3">
+                    <div>
+                      <div className="flex justify-between font-semibold text-slate-600 mb-1">
+                        <span>Dívidas Mensais</span>
+                        <span>R$ {totals.monthlyExpense.toLocaleString('pt-BR')} ({totals.expense > 0 ? ((totals.monthlyExpense / totals.expense) * 100).toFixed(0) : 0}%)</span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-slate-500 rounded-full" 
+                          style={{ width: `${totals.expense > 0 ? (totals.monthlyExpense / totals.expense) * 100 : 0}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between font-semibold text-slate-600 mb-1">
+                        <span>Dívidas Anuais</span>
+                        <span>R$ {totals.yearlyExpense.toLocaleString('pt-BR')} ({totals.expense > 0 ? ((totals.yearlyExpense / totals.expense) * 100).toFixed(0) : 0}%)</span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-purple-500 rounded-full" 
+                          style={{ width: `${totals.expense > 0 ? (totals.yearlyExpense / totals.expense) * 100 : 0}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -558,6 +656,7 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
   const [description, setDescription] = useState(initialData?.description || '');
   const [date, setDate] = useState(initialData ? format(parseISO(initialData.date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'));
   const [paid, setPaid] = useState<boolean>(initialData ? initialData.paid !== false : true);
+  const [periodicity, setPeriodicity] = useState<'monthly' | 'yearly'>(initialData?.periodicity || 'monthly');
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringMonths, setRecurringMonths] = useState('1');
 
@@ -566,6 +665,7 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
       setAmount('');
       setDescription('');
       setPaid(true);
+      setPeriodicity('monthly');
       setIsRecurring(false);
       setRecurringMonths('1');
     }
@@ -590,7 +690,8 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
           amount: parsedAmount,
           description: `${description} (${i + 1}/${recurringMonths})`,
           date: nextDate.toISOString(),
-          paid: paid
+          paid: paid,
+          periodicity: periodicity
         });
       }
     } else {
@@ -599,7 +700,8 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
         amount: parsedAmount,
         description,
         date: new Date(date + 'T12:00:00').toISOString(),
-        paid: paid
+        paid: paid,
+        periodicity: periodicity
       });
     }
     
@@ -663,6 +765,35 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
               onChange={(e) => setDate(e.target.value)}
               className="rounded-xl border-slate-200 h-11"
             />
+          </div>
+        </div>
+
+        {/* Periodicidade Selector */}
+        <div className="grid gap-1.5">
+          <Label className="text-[10px] font-bold uppercase text-slate-400 ml-1">Frequência / Periodicidade</Label>
+          <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+            <button
+              type="button"
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                periodicity === 'monthly' 
+                  ? 'bg-white text-slate-800 shadow-xs font-bold' 
+                  : 'text-slate-400 hover:text-slate-600'
+              }`}
+              onClick={() => setPeriodicity('monthly')}
+            >
+              {type === 'income' ? 'Mensal (Salário, Proventos)' : 'Mensal (Gasto de Rotina)'}
+            </button>
+            <button
+              type="button"
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                periodicity === 'yearly' 
+                  ? 'bg-white text-slate-800 shadow-xs font-bold' 
+                  : 'text-slate-400 hover:text-slate-600'
+              }`}
+              onClick={() => setPeriodicity('yearly')}
+            >
+              {type === 'income' ? 'Anual (Bônus, 13º)' : 'Anual (IPVA, Seguros)'}
+            </button>
           </div>
         </div>
 

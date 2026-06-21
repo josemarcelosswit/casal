@@ -841,25 +841,23 @@ export default function App() {
                             <tr key={t.id} className="group hover:bg-slate-50 transition-colors">
                               <td className="py-3 px-2">
                                 <div className="flex items-center gap-3">
-                                  {/* Clickable Circle Checklist Toggle */}
-                                  <button
-                                    type="button"
-                                    onClick={() => handleUpdateTransaction(t.id, { paid: t.paid === false ? true : false })}
-                                    className="flex-shrink-0 focus:outline-none transition-all active:scale-90 cursor-pointer"
-                                    title={t.paid === false ? "Marcar como Pago" : "Marcar como Não Pago"}
+                                  {/* Clickable Circle Checklist Toggle - Disabled to prevent accidental edits */}
+                                  <div 
+                                    className="flex-shrink-0"
+                                    title={t.paid === false ? "Não Pago" : "Pago"}
                                   >
                                     {t.paid === false ? (
-                                      <div className="w-5 h-5 rounded-full border-2 border-rose-300 bg-rose-50 hover:bg-rose-100 flex items-center justify-center text-rose-400 transition-colors">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-rose-300 animate-pulse" />
+                                      <div className="w-5 h-5 rounded-full border-2 border-rose-300 bg-rose-50 flex items-center justify-center text-rose-400">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-rose-300" />
                                       </div>
                                     ) : (
-                                      <div className="w-5 h-5 rounded-full border-2 border-emerald-500 bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center transition-colors">
+                                      <div className="w-5 h-5 rounded-full border-2 border-emerald-500 bg-emerald-500 text-white flex items-center justify-center">
                                         <svg className="w-3.5 h-3.5 stroke-[3]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                                         </svg>
                                       </div>
                                     )}
-                                  </button>
+                                  </div>
 
                                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${t.type === 'income' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-600'}`}>
                                     {t.type === 'income' ? <Plus className="h-4 w-4" /> : <div className="w-1.5 h-1.5 rounded-full bg-current" />}
@@ -1110,7 +1108,7 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
   const [amount, setAmount] = useState(initialData?.amount.toString() || '');
   const [description, setDescription] = useState(initialData?.description || '');
   const [date, setDate] = useState(initialData ? format(safeParseDate(initialData.date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'));
-  const [paid, setPaid] = useState<boolean>(initialData ? !!initialData.paid : false);
+  const [paid, setPaid] = useState<boolean>(initialData ? initialData.paid !== false : true);
   const [periodicity, setPeriodicity] = useState<'monthly' | 'yearly'>(initialData?.periodicity || 'monthly');
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringMonths, setRecurringMonths] = useState('1');
@@ -1120,7 +1118,7 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
     if (!initialData) {
       setAmount('');
       setDescription('');
-      setPaid(false);
+      setPaid(true);
       setPeriodicity('monthly');
       setIsRecurring(false);
       setRecurringMonths('1');
@@ -1262,28 +1260,28 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
           </div>
         </div>
 
-        {/* Status Toggle Switch */}
-        <div className="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-150 rounded-xl">
+        {/* Premium Status Toggle Switch - Disabled as requested */}
+        <div className="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-150 rounded-xl opacity-60">
           <div className="flex flex-col">
             <span className="text-xs font-bold text-slate-700">
               {type === 'income' ? 'Valor já recebido?' : 'Valor já pago?'}
             </span>
             <span className="text-[10px] text-slate-400 font-medium">
               {type === 'income' 
-                ? 'Marcar se a receita já foi recebida' 
-                : 'Marcar se a conta já foi quitada'}
+                ? 'Indica se esta receita já foi recebida' 
+                : 'Indica se esta despesa já foi paga'}
             </span>
           </div>
           <button
             type="button"
-            onClick={() => setPaid(!paid)}
-            className={`w-12 h-7 rounded-full transition-colors relative p-1 duration-200 cursor-pointer ${
+            disabled
+            className={`w-12 h-7 rounded-full transition-colors relative p-1 duration-200 cursor-not-allowed ${
               paid ? 'bg-emerald-500' : 'bg-slate-300'
             }`}
           >
             <div
               className={`w-5 h-5 bg-white rounded-full shadow-sm flex items-center justify-center transition-transform duration-200 transform ${
-                paid ? 'translate-x-[20px]' : 'translate-x-[0px]'
+                paid ? 'translate-x-[20px]' : 'translate-x-0'
               }`}
             >
               {paid ? (

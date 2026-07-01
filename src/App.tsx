@@ -247,7 +247,11 @@ export default function App() {
           cloudTransactions.push({ id: doc.id, ...doc.data() } as FinanceTransaction);
         });
         // Sort by date descending
-        cloudTransactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        cloudTransactions.sort((a, b) => {
+          const aTime = a && a.date ? safeParseDate(a.date).getTime() : 0;
+          const bTime = b && b.date ? safeParseDate(b.date).getTime() : 0;
+          return bTime - aTime;
+        });
         setTransactions(cloudTransactions);
         setLoading(false);
         setIsSyncing(false);
@@ -350,7 +354,20 @@ export default function App() {
                 setLoading(false);
               }
             } else {
-              setTransactions(data.transactions);
+              const sanitizedTransactions = data.transactions.map((t: any) => ({
+                id: t.id || (Math.random().toString(36).substring(2, 9) + '_' + Date.now()),
+                type: t.type || 'expense',
+                amount: typeof t.amount === 'number' ? t.amount : parseFloat(t.amount) || 0,
+                category: t.category || 'Geral',
+                description: t.description || '',
+                date: t.date || new Date().toISOString(),
+                month: t.month || format(safeParseDate(t.date), 'yyyy-MM'),
+                createdAt: t.createdAt || new Date().toISOString(),
+                paid: t.paid !== undefined ? t.paid : true,
+                periodicity: t.periodicity || 'monthly',
+                customTag: t.customTag || ''
+              }));
+              setTransactions(sanitizedTransactions);
             }
           }
         } else {
@@ -571,8 +588,8 @@ export default function App() {
       if (a.type === 'expense' && b.type === 'income') return 1;
       
       // If same type, sort by date descending
-      const aTime = a.date ? new Date(a.date).getTime() : 0;
-      const bTime = b.date ? new Date(b.date).getTime() : 0;
+      const aTime = a.date ? safeParseDate(a.date).getTime() : 0;
+      const bTime = b.date ? safeParseDate(b.date).getTime() : 0;
       return bTime - aTime;
     });
 

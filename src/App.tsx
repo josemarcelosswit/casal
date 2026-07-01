@@ -563,8 +563,16 @@ export default function App() {
   const filteredTransactions = transactions
     .filter(t => t && t.month === monthStr)
     .sort((a, b) => {
-      const aTime = a && a.date ? new Date(a.date).getTime() : 0;
-      const bTime = b && b.date ? new Date(b.date).getTime() : 0;
+      if (!a) return 1;
+      if (!b) return -1;
+      
+      // 'income' (ganho) always on top, 'expense' (perca) always on bottom
+      if (a.type === 'income' && b.type === 'expense') return -1;
+      if (a.type === 'expense' && b.type === 'income') return 1;
+      
+      // If same type, sort by date descending
+      const aTime = a.date ? new Date(a.date).getTime() : 0;
+      const bTime = b.date ? new Date(b.date).getTime() : 0;
       return bTime - aTime;
     });
 

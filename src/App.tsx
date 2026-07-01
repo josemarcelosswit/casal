@@ -5,7 +5,7 @@ import {
 import { 
   Wallet, TrendingUp, Plus, Trash2, Calendar, 
   ChevronLeft, ChevronRight, ChevronDown, Receipt, History, Pencil,
-  Cloud, CloudOff, Loader2, LogIn, LogOut, Check, Info, AlertCircle, RefreshCw, Smartphone
+  Cloud, CloudOff, Loader2, LogIn, LogOut, Check, Info, AlertCircle, RefreshCw, Smartphone, Search
 } from 'lucide-react';
 import { format, subMonths, addMonths, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -38,6 +38,14 @@ import {
 } from 'firebase/auth';
 
 const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+
+export const TAG_PRESETS = [
+  { id: 'ganho', emoji: '📈', label: 'Ganho', bg: 'bg-emerald-50 text-emerald-700 border-emerald-100' },
+  { id: 'perca', emoji: '📉', label: 'Perca', bg: 'bg-rose-50 text-rose-700 border-rose-100' },
+  { id: 'jose', emoji: '🧔', label: 'José', bg: 'bg-indigo-50 text-indigo-700 border-indigo-100' },
+  { id: 'ster', emoji: '🤓', label: 'Ster (Óculos)', bg: 'bg-amber-50 text-amber-700 border-amber-100' },
+  { id: 'cacheada', emoji: '👩‍🦱', label: 'Black Ruivo', bg: 'bg-purple-50 text-purple-700 border-purple-100' },
+];
 
 function safeParseDate(dateVal: any): Date {
   if (!dateVal) return new Date();
@@ -124,6 +132,7 @@ export default function App() {
   const [transactionToDelete, setTransactionToDelete] = useState<FinanceTransaction | null>(null);
   const [relatedTransactions, setRelatedTransactions] = useState<FinanceTransaction[]>([]);
   const [periodicityFilter, setPeriodicityFilter] = useState<'all' | 'monthly' | 'yearly'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Authentication & Cloud Sync states
   const [user, setUser] = useState<User | null>(null);
@@ -212,7 +221,8 @@ export default function App() {
                 month: t.month || format(new Date(), 'yyyy-MM'),
                 createdAt: t.createdAt || new Date().toISOString(),
                 paid: t.paid !== undefined ? t.paid : true,
-                periodicity: t.periodicity || 'monthly'
+                periodicity: t.periodicity || 'monthly',
+                customTag: t.customTag || ''
               });
             });
             try {
@@ -324,7 +334,8 @@ export default function App() {
                     month: t.month || format(new Date(), 'yyyy-MM'),
                     createdAt: t.createdAt || new Date().toISOString(),
                     paid: t.paid !== undefined ? t.paid : true,
-                    periodicity: t.periodicity || 'monthly'
+                    periodicity: t.periodicity || 'monthly',
+                    customTag: t.customTag || ''
                   });
                 });
                 try {
@@ -367,6 +378,7 @@ export default function App() {
       paid: data.paid !== undefined ? data.paid : true,
       periodicity: data.periodicity || 'monthly',
       recurrenceId: data.recurrenceId || undefined,
+      customTag: data.customTag || '',
       createdAt: new Date().toISOString()
     };
 
@@ -578,10 +590,34 @@ export default function App() {
 
   const displayFilteredTransactions = filteredTransactions.filter(t => {
     if (!t) return false;
-    if (periodicityFilter === 'all') return true;
-    if (periodicityFilter === 'monthly') return t.periodicity !== 'yearly';
-    if (periodicityFilter === 'yearly') return t.periodicity === 'yearly';
-    return true;
+    
+    // 1. Periodicity filter
+    let matchesPeriodicity = true;
+    if (periodicityFilter === 'monthly') {
+      matchesPeriodicity = t.periodicity !== 'yearly';
+    } else if (periodicityFilter === 'yearly') {
+      matchesPeriodicity = t.periodicity === 'yearly';
+    }
+    
+    // 2. Search query filter
+    let matchesSearch = true;
+    if (searchQuery.trim() !== '') {
+      const q = searchQuery.toLowerCase();
+      const desc = (t.description || '').toLowerCase();
+      const tag = (t.customTag || '').toLowerCase();
+      
+      // Map tag ID to its label for easy searching
+      let tagLabel = '';
+      if (tag === 'jose') tagLabel = 'josé';
+      else if (tag === 'ster') tagLabel = 'ster óculos';
+      else if (tag === 'cacheada') tagLabel = 'black ruivo';
+      else if (tag === 'ganho') tagLabel = 'ganho';
+      else if (tag === 'perca') tagLabel = 'perca';
+      
+      matchesSearch = desc.includes(q) || tag.includes(q) || tagLabel.includes(q);
+    }
+    
+    return matchesPeriodicity && matchesSearch;
   });
 
   if (loading) {
@@ -949,7 +985,28 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="p-5 flex-1">
+                <div className="p-5 flex-1 animate-fade-in">
+                  {/* Campo de Busca de Dívidas */}
+                  <div className="mb-4.5 relative">
+                    <Search className="absolute left-3.5 top-2.5 h-4 w-4 text-slate-400" />
+                    <Input
+                      type="text"
+                      placeholder="Procurar dívida pelo nome ou marcador (ex: José, Ster, Perca)..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-10 h-9 rounded-xl border-slate-250 bg-slate-50/40 focus-visible:bg-white focus-visible:ring-blue-500/25 focus-visible:border-blue-500 text-xs text-slate-700"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-3.5 top-2.5 text-[10px] font-extrabold uppercase text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        Limpar
+                      </button>
+                    )}
+                  </div>
+
                   {/* Filter Header controls - minimalist segmented design */}
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 mb-4 border-b border-slate-50 gap-3">
                     <div className="flex bg-slate-100/85 p-0.5 rounded-lg border border-slate-200/50 self-start">
@@ -1020,8 +1077,18 @@ export default function App() {
                             </button>
 
                             <div className="min-w-0">
-                              <p className={`font-semibold text-slate-700 text-sm leading-snug truncate ${t.paid === false ? 'text-slate-500 font-medium' : ''}`}>
-                                {t.description}
+                              <p className={`font-semibold text-slate-700 text-sm leading-snug flex flex-wrap items-center gap-1.5 truncate ${t.paid === false ? 'text-slate-500 font-medium' : ''}`}>
+                                {t.customTag && (() => {
+                                  const tagObj = TAG_PRESETS.find(p => p.id === t.customTag);
+                                  if (!tagObj) return null;
+                                  return (
+                                    <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-extrabold rounded border ${tagObj.bg} shrink-0`}>
+                                      <span>{tagObj.emoji}</span>
+                                      <span>{tagObj.label}</span>
+                                    </span>
+                                  );
+                                })()}
+                                <span className="truncate">{t.description}</span>
                               </p>
                               <div className="flex items-center gap-2 mt-1">
                                 <span className="text-[10px] text-slate-400 font-medium">
@@ -1291,6 +1358,7 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringMonths, setRecurringMonths] = useState('1');
   const [recurringType, setRecurringType] = useState<'split' | 'replicate'>('split');
+  const [customTag, setCustomTag] = useState<string>(initialData?.customTag || '');
 
   const reset = () => {
     if (!initialData) {
@@ -1301,6 +1369,7 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
       setIsRecurring(false);
       setRecurringMonths('1');
       setRecurringType('split');
+      setCustomTag('');
     }
   };
 
@@ -1333,7 +1402,8 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
           date: nextDate.toISOString(),
           paid: paid,
           periodicity: periodicity,
-          recurrenceId: recurrenceId
+          recurrenceId: recurrenceId,
+          customTag: customTag
         });
       }
     } else {
@@ -1344,7 +1414,8 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
         description,
         date: finalDate.toISOString(),
         paid: paid,
-        periodicity: periodicity
+        periodicity: periodicity,
+        customTag: customTag
       });
     }
     
@@ -1450,6 +1521,39 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
           >
             {type === 'income' ? 'Anual (Anuidade, Bônus)' : 'Anual (IPVA, IPTU)'}
           </button>
+        </div>
+      </div>
+
+      {/* Marcador / Atribuição (Emoji) - Beautiful grid of presets */}
+      <div className="grid gap-1.5">
+        <Label className="text-[10px] font-bold uppercase text-slate-400 ml-0.5">Responsável / Marcador (Emoji)</Label>
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={() => setCustomTag('')}
+            className={`px-2.5 py-1.5 text-[11px] font-bold rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+              customTag === ''
+                ? 'bg-slate-200 border-slate-300 text-slate-800 shadow-xs'
+                : 'bg-white border-slate-200 text-slate-400 hover:text-slate-600 hover:border-slate-300'
+            }`}
+          >
+            Sem Marcador
+          </button>
+          {TAG_PRESETS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => setCustomTag(p.id)}
+              className={`px-2.5 py-1.5 text-[11px] font-bold rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                customTag === p.id
+                  ? `${p.bg} border-blue-500 ring-2 ring-blue-50/50 shadow-xs`
+                  : 'bg-white border-slate-200 text-slate-600 hover:text-slate-800 hover:border-slate-300'
+              }`}
+            >
+              <span className="text-sm shrink-0">{p.emoji}</span>
+              <span>{p.label}</span>
+            </button>
+          ))}
         </div>
       </div>
 

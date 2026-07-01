@@ -13,6 +13,7 @@ export interface FinanceTransaction {
   paid?: boolean;
   periodicity?: 'monthly' | 'yearly';
   recurrenceId?: string;
+  customTag?: string;
 }
 
 export interface UserProfile {

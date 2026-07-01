@@ -40,11 +40,11 @@ import {
 const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
 export const TAG_PRESETS = [
-  { id: 'ganho', emoji: '📈', label: 'Ganho', bg: 'bg-emerald-50 text-emerald-700 border-emerald-100' },
-  { id: 'perca', emoji: '📉', label: 'Perca', bg: 'bg-rose-50 text-rose-700 border-rose-100' },
-  { id: 'jose', emoji: '🧔', label: 'José', bg: 'bg-indigo-50 text-indigo-700 border-indigo-100' },
-  { id: 'ster', emoji: '🤓', label: 'Ster (Óculos)', bg: 'bg-amber-50 text-amber-700 border-amber-100' },
-  { id: 'cacheada', emoji: '👩‍🦱', label: 'Black Ruivo', bg: 'bg-purple-50 text-purple-700 border-purple-100' },
+  { id: 'ganho', label: 'Ganho', bg: 'bg-emerald-50 text-emerald-700 border-emerald-100' },
+  { id: 'perca', label: 'Perca', bg: 'bg-rose-50 text-rose-700 border-rose-100' },
+  { id: 'jose', label: 'José', bg: 'bg-indigo-50 text-indigo-700 border-indigo-100' },
+  { id: 'ster', label: 'Ster (Óculos)', bg: 'bg-amber-50 text-amber-700 border-amber-100' },
+  { id: 'cacheada', label: 'Black Ruivo', bg: 'bg-purple-50 text-purple-700 border-purple-100' },
 ];
 
 function safeParseDate(dateVal: any): Date {
@@ -947,13 +947,13 @@ export default function App() {
           <KPICard 
             label="Despesas Fixas" 
             amount={totals.expense} 
-            color="slate" 
+            color="rose" 
             subtext={`Mensais: R$ ${totals.monthlyExpense.toLocaleString('pt-BR')} • Anuais: R$ ${totals.yearlyExpense.toLocaleString('pt-BR')}`}
           />
           <KPICard 
             label="Saldo Restante" 
             amount={balance} 
-            color={balance >= 0 ? "emerald" : "amber"} 
+            color="orange" 
             subtext={totals.unpaidExpense > 0 ? `Falta quitar: R$ ${totals.unpaidExpense.toLocaleString('pt-BR')}` : 'Contas quitadas'}
           />
           <KPICard 
@@ -985,11 +985,11 @@ export default function App() {
                   </div>
                   <div>
                     <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-0.5">Despesas</span>
-                    <span className="text-sm font-semibold text-slate-700 font-heading">R$ {totals.expense.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                    <span className="text-sm font-semibold text-rose-600 font-heading">R$ {totals.expense.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                   </div>
                   <div>
                     <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block mb-0.5">Sobra</span>
-                    <span className={`text-sm font-semibold font-heading ${balance >= 0 ? 'text-indigo-600' : 'text-rose-600'}`}>R$ {balance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                    <span className="text-sm font-semibold text-orange-500 font-heading">R$ {balance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                   </div>
                 </div>
 
@@ -1090,8 +1090,7 @@ export default function App() {
                                   const tagObj = TAG_PRESETS.find(p => p.id === t.customTag);
                                   if (!tagObj) return null;
                                   return (
-                                    <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[9px] font-extrabold rounded border ${tagObj.bg} shrink-0`}>
-                                      <span>{tagObj.emoji}</span>
+                                    <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-extrabold rounded border ${tagObj.bg} shrink-0`}>
                                       <span>{tagObj.label}</span>
                                     </span>
                                   );
@@ -1115,7 +1114,7 @@ export default function App() {
                           </div>
 
                           <div className="flex items-center gap-4 pl-3 shrink-0">
-                            <span className={`font-semibold text-sm tabular-nums tracking-tight font-heading ${t.type === 'income' ? 'text-emerald-600' : 'text-slate-800'}`}>
+                            <span className={`font-semibold text-sm tabular-nums tracking-tight font-heading ${t.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
                               {t.type === 'income' ? '+' : '-'} R$ {t.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </span>
 
@@ -1243,19 +1242,23 @@ export default function App() {
   );
 }
 
-function KPICard({ label, amount, color, isPercent = false, subtext }: { label: string, amount: number, color: 'emerald' | 'slate' | 'amber' | 'blue', isPercent?: boolean, subtext?: string }) {
+function KPICard({ label, amount, color, isPercent = false, subtext }: { label: string, amount: number, color: 'emerald' | 'slate' | 'amber' | 'blue' | 'rose' | 'orange', isPercent?: boolean, subtext?: string }) {
   const textColors = {
     emerald: 'text-emerald-650',
     slate: 'text-slate-800',
     amber: 'text-amber-600',
-    blue: 'text-indigo-600'
+    blue: 'text-indigo-600',
+    rose: 'text-rose-600',
+    orange: 'text-orange-500'
   };
 
   const borderColors = {
     emerald: 'border-emerald-100',
     slate: 'border-slate-100',
     amber: 'border-amber-100',
-    blue: 'border-indigo-100'
+    blue: 'border-indigo-100',
+    rose: 'border-rose-100',
+    orange: 'border-orange-100'
   };
 
   return (
@@ -1263,7 +1266,7 @@ function KPICard({ label, amount, color, isPercent = false, subtext }: { label: 
       <div>
         <div className="flex items-center justify-between mb-2">
           <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{label}</p>
-          <span className={`w-2 h-2 rounded-full ${color === 'emerald' ? 'bg-emerald-400' : color === 'amber' ? 'bg-amber-400' : color === 'blue' ? 'bg-indigo-400' : 'bg-slate-400'}`} />
+          <span className={`w-2 h-2 rounded-full ${color === 'emerald' ? 'bg-emerald-400' : color === 'amber' ? 'bg-amber-400' : color === 'blue' ? 'bg-indigo-400' : color === 'rose' ? 'bg-rose-400' : color === 'orange' ? 'bg-orange-400' : 'bg-slate-400'}`} />
         </div>
         <div className="flex items-baseline gap-1.5">
           <p className={`text-2xl sm:text-2.5xl font-semibold font-heading tracking-tight tabular-nums leading-none ${textColors[color]}`}>
@@ -1552,13 +1555,12 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
               key={p.id}
               type="button"
               onClick={() => setCustomTag(p.id)}
-              className={`px-2.5 py-1.5 text-[11px] font-bold rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+              className={`px-2.5 py-1.5 text-[11px] font-bold rounded-lg border transition-all cursor-pointer flex items-center ${
                 customTag === p.id
                   ? `${p.bg} border-blue-500 ring-2 ring-blue-50/50 shadow-xs`
                   : 'bg-white border-slate-200 text-slate-600 hover:text-slate-800 hover:border-slate-300'
               }`}
             >
-              <span className="text-sm shrink-0">{p.emoji}</span>
               <span>{p.label}</span>
             </button>
           ))}

@@ -26,7 +26,7 @@ import {
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
-import { auth, db } from './lib/firebase';
+import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
 import { 
   collection, doc, setDoc, deleteDoc, updateDoc, 
   onSnapshot, query, writeBatch 
@@ -146,81 +146,31 @@ export default function App() {
     }
 
     // Sync current month state from LocalStorage on mount
-    const savedMonth = localStorage.getItem('financas_cadal_month');
-    if (savedMonth) {
-      setCurrentMonth(safeParseDate(savedMonth));
+    try {
+      const savedMonth = localStorage.getItem('financas_cadal_month');
+      if (savedMonth) {
+        setCurrentMonth(safeParseDate(savedMonth));
+      }
+    } catch (e) {
+      console.error("Error loading saved month:", e);
     }
 
-    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       
-      if (currentUser) {
+      if (!currentUser) {
+        // No user authenticated: fallback to LocalStorage
         setLoading(true);
         setIsSyncing(true);
-        
-        // 1. Check & Migrate Any Local Transactions to Cloud Automatically
-        const savedLocal = localStorage.getItem('financas_cadal_transactions');
-        if (savedLocal) {
-          try {
-            const localTrxs = JSON.parse(savedLocal) as FinanceTransaction[];
-            if (localTrxs.length > 0) {
-              const batch = writeBatch(db);
-              localTrxs.forEach((t) => {
-                const docRef = doc(db, 'users', currentUser.uid, 'transactions', t.id);
-                // Map local schema to valid transaction matching firestore.rules
-                batch.set(docRef, {
-                  userId: currentUser.uid,
-                  type: t.type,
-                  amount: t.amount,
-                  category: t.category || 'Geral',
-                  description: t.description || '',
-                  date: t.date || new Date().toISOString(),
-                  month: t.month || format(new Date(), 'yyyy-MM'),
-                  createdAt: t.createdAt || new Date().toISOString(),
-                  paid: t.paid !== undefined ? t.paid : true,
-                  periodicity: t.periodicity || 'monthly'
-                });
-              });
-              await batch.commit();
-              // Clear localStorage for transactions after migration to avoid duplicate operations
-              localStorage.removeItem('financas_cadal_transactions');
-            }
-          } catch (migrateErr) {
-            console.error("Migration error:", migrateErr);
-          }
-        }
-
-        // 2. Subscribe to Firestore Real-time Transactions from '/users/{userId}/transactions'
-        const q = query(collection(db, 'users', currentUser.uid, 'transactions'));
-        const unsubscribeFirestore = onSnapshot(q, (snapshot) => {
-          const cloudTransactions: FinanceTransaction[] = [];
-          snapshot.forEach((doc) => {
-            cloudTransactions.push({ id: doc.id, ...doc.data() } as FinanceTransaction);
-          });
-          // Sort by date descending
-          cloudTransactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          setTransactions(cloudTransactions);
-          setLoading(false);
-          setIsSyncing(false);
-        }, (err) => {
-          console.error("Firestore snapshot error:", err);
-          setLoading(false);
-          setIsSyncing(false);
-        });
-
-        return () => {
-          unsubscribeFirestore();
-        };
-      } else {
-        // No user authenticated: fallback to LocalStorage
-        const savedTransactions = localStorage.getItem('financas_cadal_transactions');
-        if (savedTransactions) {
-          try {
+        try {
+          const savedTransactions = localStorage.getItem('financas_cadal_transactions');
+          if (savedTransactions) {
             setTransactions(JSON.parse(savedTransactions));
-          } catch (err) {
+          } else {
             setTransactions([]);
           }
-        } else {
+        } catch (err) {
+          console.error("Error reading local transactions:", err);
           setTransactions([]);
         }
         setLoading(false);
@@ -233,17 +183,99 @@ export default function App() {
     };
   }, []);
 
+  // Manage Firestore subscription and migration when user logs in/out
+  useEffect(() => {
+    if (!user) return;
+
+    setLoading(true);
+    setIsSyncing(true);
+
+    let unsubscribeFirestore: (() => void) | null = null;
+
+    const initializeCloudSync = async () => {
+      // 1. Check & Migrate Any Local Transactions to Cloud Automatically
+      try {
+        const savedLocal = localStorage.getItem('financas_cadal_transactions');
+        if (savedLocal) {
+          const localTrxs = JSON.parse(savedLocal) as FinanceTransaction[];
+          if (localTrxs.length > 0) {
+            const batch = writeBatch(db);
+            localTrxs.forEach((t) => {
+              const docRef = doc(db, 'users', user.uid, 'transactions', t.id);
+              batch.set(docRef, {
+                userId: user.uid,
+                type: t.type,
+                amount: t.amount,
+                category: t.category || 'Geral',
+                description: t.description || '',
+                date: t.date || new Date().toISOString(),
+                month: t.month || format(new Date(), 'yyyy-MM'),
+                createdAt: t.createdAt || new Date().toISOString(),
+                paid: t.paid !== undefined ? t.paid : true,
+                periodicity: t.periodicity || 'monthly'
+              });
+            });
+            try {
+              await batch.commit();
+            } catch (writeErr) {
+              handleFirestoreError(writeErr, OperationType.WRITE, `users/${user.uid}/transactions`);
+            }
+            try {
+              localStorage.removeItem('financas_cadal_transactions');
+            } catch (e) {}
+          }
+        }
+      } catch (migrateErr) {
+        console.error("Migration error:", migrateErr);
+      }
+
+      // 2. Subscribe to Firestore Real-time Transactions from '/users/{userId}/transactions'
+      const q = query(collection(db, 'users', user.uid, 'transactions'));
+      unsubscribeFirestore = onSnapshot(q, (snapshot) => {
+        const cloudTransactions: FinanceTransaction[] = [];
+        snapshot.forEach((doc) => {
+          cloudTransactions.push({ id: doc.id, ...doc.data() } as FinanceTransaction);
+        });
+        // Sort by date descending
+        cloudTransactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        setTransactions(cloudTransactions);
+        setLoading(false);
+        setIsSyncing(false);
+      }, (err) => {
+        handleFirestoreError(err, OperationType.GET, `users/${user.uid}/transactions`);
+        setLoading(false);
+        setIsSyncing(false);
+      });
+    };
+
+    initializeCloudSync();
+
+    return () => {
+      if (unsubscribeFirestore) {
+        unsubscribeFirestore();
+      }
+    };
+  }, [user]);
+
   // Save guest transactions only when not authenticated
   useEffect(() => {
     if (!loading && !user) {
-      localStorage.setItem('financas_cadal_transactions', JSON.stringify(transactions));
+      try {
+        localStorage.setItem('financas_cadal_transactions', JSON.stringify(transactions));
+      } catch (err) {
+        console.error("Error saving transactions to localStorage:", err);
+      }
     }
   }, [transactions, loading, user]);
 
   // Save current month to LocalStorage (works for both guests & authenticated users)
   useEffect(() => {
     if (!loading) {
-      localStorage.setItem('financas_cadal_month', currentMonth.toISOString());
+      try {
+        localStorage.setItem('financas_cadal_month', currentMonth.toISOString());
+      } catch (err) {
+        console.error("Error saving month to localStorage:", err);
+      }
     }
   }, [currentMonth, loading]);
 
@@ -295,7 +327,11 @@ export default function App() {
                     periodicity: t.periodicity || 'monthly'
                   });
                 });
-                await batch.commit();
+                try {
+                  await batch.commit();
+                } catch (batchErr) {
+                  handleFirestoreError(batchErr, OperationType.WRITE, `users/${user.uid}/transactions`);
+                }
               } catch (migrateErr) {
                 console.error("Import cloud write error:", migrateErr);
                 alert("Erro ao importar dados na nuvem.");
@@ -338,7 +374,7 @@ export default function App() {
       try {
         await setDoc(doc(db, 'users', user.uid, 'transactions', newId), newTransaction);
       } catch (err) {
-        console.error("Error creating document in Firestore:", err);
+        handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}/transactions/${newId}`);
       }
     } else {
       setTransactions(prev => [newTransaction, ...prev]);
@@ -354,7 +390,7 @@ export default function App() {
       try {
         await deleteDoc(doc(db, 'users', user.uid, 'transactions', id));
       } catch (err) {
-        console.error("Error deleting document from Firestore:", err);
+        handleFirestoreError(err, OperationType.DELETE, `users/${user.uid}/transactions/${id}`);
       }
     } else {
       setTransactions(prev => prev.filter(t => t && t.id && t.id !== id));
@@ -401,7 +437,11 @@ export default function App() {
             batch.delete(doc(db, 'users', user.uid, 'transactions', t.id));
           }
         });
-        await batch.commit();
+        try {
+          await batch.commit();
+        } catch (batchErr) {
+          handleFirestoreError(batchErr, OperationType.WRITE, `users/${user.uid}/transactions`);
+        }
       } else {
         const idsToDelete = new Set(relatedTransactions.filter(t => t && t.id).map(t => t.id));
         setTransactions(prev => prev.filter(t => t && t.id && !idsToDelete.has(t.id)));
@@ -425,7 +465,7 @@ export default function App() {
       try {
         await setDoc(doc(db, 'users', user.uid, 'transactions', id), updatedData, { merge: true });
       } catch (err) {
-        console.error("Error updating document in Firestore:", err);
+        handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}/transactions/${id}`);
       }
     } else {
       setTransactions(prev => prev.map(t => {
@@ -688,115 +728,113 @@ export default function App() {
         </div>
 
         {/* Auth Sincronizar Modal */}
-        {!user && (
-          <Dialog open={authModalOpen} onOpenChange={setAuthModalOpen}>
-            <DialogContent className="sm:max-w-[420px] rounded-2xl border-slate-200 bg-white shadow-2xl p-5">
-              <DialogHeader>
-                <DialogTitle className="text-xl font-bold flex items-center gap-2">
-                  <Cloud className="h-6 w-6 text-blue-600 animate-bounce animate-duration-1000" />
-                  Sincronizar com Nuvem
-                </DialogTitle>
-                <DialogDescription className="text-slate-500 text-xs mt-1">
-                  Guarde suas receitas e despesas na nuvem para não perder nada e acessar do seu celular ou do computador de forma sincronizada!
-                </DialogDescription>
-              </DialogHeader>
+        <Dialog open={authModalOpen && !user} onOpenChange={setAuthModalOpen}>
+          <DialogContent className="sm:max-w-[420px] rounded-2xl border-slate-200 bg-white shadow-2xl p-5">
+            <DialogHeader>
+              <DialogTitle className="text-xl font-bold flex items-center gap-2">
+                <Cloud className="h-6 w-6 text-blue-600 animate-bounce animate-duration-1000" />
+                Sincronizar com Nuvem
+              </DialogTitle>
+              <DialogDescription className="text-slate-500 text-xs mt-1">
+                Guarde suas receitas e despesas na na nuvem para não perder nada e acessar do seu celular ou do computador de forma sincronizada!
+              </DialogDescription>
+            </DialogHeader>
 
-              {authError && (
-                <div className="bg-rose-50 border border-rose-150 rounded-xl p-3 flex items-start gap-2.5 text-xs text-rose-600 animate-shake">
-                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                  <span>{authError}</span>
-                </div>
-              )}
+            {authError && (
+              <div className="bg-rose-50 border border-rose-150 rounded-xl p-3 flex items-start gap-2.5 text-xs text-rose-600 animate-shake">
+                <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>{authError}</span>
+              </div>
+            )}
 
-              {/* Direct Help Banner for specific credentials */}
-              <div className="bg-blue-50/80 p-3 rounded-xl border border-blue-100 text-xs text-blue-700 space-y-1">
-                <span className="font-bold flex items-center gap-1">🔑 Acesso Sincronizado:</span>
-                <p className="text-[11px] leading-relaxed text-blue-600 font-medium">
-                  Digite o usuário <strong className="font-extrabold bg-white px-1.5 py-0.5 rounded border border-blue-200 text-blue-700">cerveja</strong> e a sua senha cadastrada no campo correspondente!
+            {/* Direct Help Banner for specific credentials */}
+            <div className="bg-blue-50/80 p-3 rounded-xl border border-blue-100 text-xs text-blue-700 space-y-1">
+              <span className="font-bold flex items-center gap-1">🔑 Acesso Sincronizado:</span>
+              <p className="text-[11px] leading-relaxed text-blue-600 font-medium">
+                Digite o usuário <strong className="font-extrabold bg-white px-1.5 py-0.5 rounded border border-blue-200 text-blue-700">cerveja</strong> e a sua senha cadastrada no campo correspondente!
+              </p>
+            </div>
+
+            {isIframe && (
+              <div className="bg-amber-50/90 border border-amber-150 p-3 rounded-xl text-[11px] text-amber-800 space-y-2 leading-relaxed">
+                <span className="font-extrabold flex items-center gap-1 text-amber-900">💡 Dica Importante para Celular:</span>
+                <p>
+                  Para não precisar logar de novo ao atualizar a página no celular, use o link direto do app fora do chat:
                 </p>
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    readOnly 
+                    value={window.location.href} 
+                    className="bg-white border border-amber-200 rounded px-2 py-1 text-[10px] select-all font-mono flex-1 text-slate-700"
+                    id="direct-app-link"
+                  />
+                  <Button 
+                    type="button"
+                    size="sm" 
+                    className="h-7 text-[10px] bg-amber-600 hover:bg-amber-700 text-white font-bold px-2 rounded cursor-pointer animate-pulse hover:animate-none"
+                    onClick={() => {
+                      const el = document.getElementById('direct-app-link') as HTMLInputElement;
+                      if (el) {
+                        el.select();
+                        navigator.clipboard.writeText(el.value);
+                        alert('Link copiado! Abra no Safari ou Chrome do celular.');
+                      }
+                    }}
+                  >
+                    Copiar
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <form onSubmit={handleEmailAuth} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="auth-email-global" className="text-[10px] font-bold uppercase text-slate-400">E-mail ou Usuário</Label>
+                <Input
+                  id="auth-email-global"
+                  type="text"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  placeholder="Ex: cerveja ou seu e-mail"
+                  className="rounded-xl border-slate-250 focus-visible:ring-blue-500/25 focus-visible:border-blue-500 placeholder:text-slate-350 bg-white"
+                  required
+                />
               </div>
 
-              {isIframe && (
-                <div className="bg-amber-50/90 border border-amber-150 p-3 rounded-xl text-[11px] text-amber-800 space-y-2 leading-relaxed">
-                  <span className="font-extrabold flex items-center gap-1 text-amber-900">💡 Dica Importante para Celular:</span>
-                  <p>
-                    Para não precisar logar de novo ao atualizar a página no celular, use o link direto do app fora do chat:
-                  </p>
-                  <div className="flex gap-2">
-                    <input 
-                      type="text" 
-                      readOnly 
-                      value={window.location.href} 
-                      className="bg-white border border-amber-200 rounded px-2 py-1 text-[10px] select-all font-mono flex-1 text-slate-700"
-                      id="direct-app-link"
-                    />
-                    <Button 
-                      type="button"
-                      size="sm" 
-                      className="h-7 text-[10px] bg-amber-600 hover:bg-amber-700 text-white font-bold px-2 rounded cursor-pointer animate-pulse hover:animate-none"
-                      onClick={() => {
-                        const el = document.getElementById('direct-app-link') as HTMLInputElement;
-                        if (el) {
-                          el.select();
-                          navigator.clipboard.writeText(el.value);
-                          alert('Link copiado! Abra no Safari ou Chrome do celular.');
-                        }
-                      }}
-                    >
-                      Copiar
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              <form onSubmit={handleEmailAuth} className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="auth-email-global" className="text-[10px] font-bold uppercase text-slate-400">E-mail ou Usuário</Label>
-                  <Input
-                    id="auth-email-global"
-                    type="text"
-                    value={authEmail}
-                    onChange={(e) => setAuthEmail(e.target.value)}
-                    placeholder="Ex: cerveja ou seu e-mail"
-                    className="rounded-xl border-slate-250 focus-visible:ring-blue-500/25 focus-visible:border-blue-500 placeholder:text-slate-350 bg-white"
-                    required
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label htmlFor="auth-password-global" className="text-[10px] font-bold uppercase text-slate-400">Senha</Label>
-                  <Input
-                    id="auth-password-global"
-                    type="password"
-                    value={authPassword}
-                    onChange={(e) => setAuthPassword(e.target.value)}
-                    placeholder="Sua senha secreta"
-                    className="rounded-xl border-slate-250 focus-visible:ring-blue-500/25 focus-visible:border-blue-500 bg-white"
-                    required
-                  />
-                </div>
-
-                <Button
-                  type="submit"
-                  disabled={submittingAuth}
-                  className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md cursor-pointer transition-all flex items-center justify-center gap-2"
-                >
-                  {submittingAuth ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <LogIn className="h-4 w-4" />
-                  )}
-                  Entrar e Sincronizar
-                </Button>
-              </form>
-
-              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150 text-[10px] text-slate-500 font-semibold space-y-1 text-center">
-                <span className="flex items-center justify-center gap-1.5"><Smartphone className="h-3.5 w-3.5 text-blue-500 shrink-0" /> Perfeito para usar no celular e PC!</span>
-                <span className="flex items-center justify-center gap-1.5 text-emerald-600"><Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" /> Seus dados atuais migram automaticamente!</span>
+              <div className="space-y-1.5">
+                <Label htmlFor="auth-password-global" className="text-[10px] font-bold uppercase text-slate-400">Senha</Label>
+                <Input
+                  id="auth-password-global"
+                  type="password"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  placeholder="Sua senha secreta"
+                  className="rounded-xl border-slate-250 focus-visible:ring-blue-500/25 focus-visible:border-blue-500 bg-white"
+                  required
+                />
               </div>
-            </DialogContent>
-          </Dialog>
-        )}
+
+              <Button
+                type="submit"
+                disabled={submittingAuth}
+                className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md cursor-pointer transition-all flex items-center justify-center gap-2"
+              >
+                {submittingAuth ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <LogIn className="h-4 w-4" />
+                )}
+                Entrar e Sincronizar
+              </Button>
+            </form>
+
+            <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150 text-[10px] text-slate-500 font-semibold space-y-1 text-center">
+              <span className="flex items-center justify-center gap-1.5"><Smartphone className="h-3.5 w-3.5 text-blue-500 shrink-0" /> Perfeito para usar no celular e PC!</span>
+              <span className="flex items-center justify-center gap-1.5 text-emerald-600"><Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" /> Seus dados atuais migram automaticamente!</span>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Modal de Confirmação de Exclusão de Lançamento Recorrente */}
         <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
@@ -982,7 +1020,7 @@ export default function App() {
                             </button>
 
                             <div className="min-w-0">
-                              <p className={`font-semibold text-slate-700 text-sm leading-snug truncate ${t.paid === false ? 'text-slate-450 font-medium line-through' : ''}`}>
+                              <p className={`font-semibold text-slate-700 text-sm leading-snug truncate ${t.paid === false ? 'text-slate-500 font-medium' : ''}`}>
                                 {t.description}
                               </p>
                               <div className="flex items-center gap-2 mt-1">

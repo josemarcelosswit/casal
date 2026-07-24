@@ -15,10 +15,3 @@ export interface FinanceTransaction {
   recurrenceId?: string;
   customTag?: string;
 }
-
-export interface UserProfile {
-  uid: string;
-  email: string;
-  displayName?: string;
-  createdAt: string;
-}

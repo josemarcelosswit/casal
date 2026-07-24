@@ -5,7 +5,8 @@ import {
 import { 
   Wallet, TrendingUp, Plus, Trash2, Calendar, 
   ChevronLeft, ChevronRight, ChevronDown, Receipt, History, Pencil,
-  Cloud, CloudOff, Loader2, LogIn, LogOut, Check, Info, AlertCircle, RefreshCw, Smartphone, Search
+  Check, Info, AlertCircle, RefreshCw, Search,
+  Lock, KeyRound, User, LogOut, ShieldCheck
 } from 'lucide-react';
 import { format, subMonths, addMonths, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -26,26 +27,7 @@ import {
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
-import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
-import { 
-  collection, doc, setDoc, deleteDoc, updateDoc, 
-  onSnapshot, query, writeBatch 
-} from 'firebase/firestore';
-import { 
-  onAuthStateChanged, signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, User, signOut,
-  GoogleAuthProvider, signInWithPopup
-} from 'firebase/auth';
-
 const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
-
-export const TAG_PRESETS = [
-  { id: 'ganho', label: 'Ganho', bg: 'bg-emerald-50 text-emerald-700 border-emerald-100' },
-  { id: 'perca', label: 'Perca', bg: 'bg-rose-50 text-rose-700 border-rose-100' },
-  { id: 'jose', label: 'José', bg: 'bg-indigo-50 text-indigo-700 border-indigo-100' },
-  { id: 'ster', label: 'Ster (Óculos)', bg: 'bg-amber-50 text-amber-700 border-amber-100' },
-  { id: 'cacheada', label: 'Black Ruivo', bg: 'bg-purple-50 text-purple-700 border-purple-100' },
-];
 
 function safeParseDate(dateVal: any): Date {
   if (!dateVal) return new Date();
@@ -134,27 +116,73 @@ export default function App() {
   const [periodicityFilter, setPeriodicityFilter] = useState<'all' | 'monthly' | 'yearly'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Authentication & Cloud Sync states
-  const [user, setUser] = useState<User | null>(null);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [authEmail, setAuthEmail] = useState('');
-  const [authPassword, setAuthPassword] = useState('');
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [authError, setAuthError] = useState('');
-  const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [submittingAuth, setSubmittingAuth] = useState(false);
-  
-  const [isIframe, setIsIframe] = useState(false);
-
-  // Authenticated state & Real-time Sync
-  useEffect(() => {
+  // Local Password Access State (User: 'nos', Pass: '159632#')
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     try {
-      setIsIframe(window.self !== window.top);
+      return localStorage.getItem('financas_app_authenticated') === 'true';
     } catch (e) {
-      setIsIframe(true);
+      return false;
     }
+  });
+  const [loginUser, setLoginUser] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
 
-    // Sync current month state from LocalStorage on mount
+  const handleLoginSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError('');
+
+    const cleanUser = loginUser
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, ""); // "nós" or "nos"
+    const cleanPass = loginPassword.trim();
+
+    if (cleanUser === 'nos' && cleanPass === '159632#') {
+      setIsAuthenticated(true);
+      try {
+        localStorage.setItem('financas_app_authenticated', 'true');
+      } catch (e) {}
+      setLoginUser('');
+      setLoginPassword('');
+    } else {
+      setLoginError('Usuário ou senha incorretos.');
+    }
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    try {
+      localStorage.removeItem('financas_app_authenticated');
+    } catch (e) {}
+  };
+
+  // IndexedDB redundant backup helpers
+  const saveToIndexedDB = (data: FinanceTransaction[]) => {
+    try {
+      const request = indexedDB.open('FinancasAppDB', 1);
+      request.onupgradeneeded = (e: any) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('transactions')) {
+          db.createObjectStore('transactions', { keyPath: 'id' });
+        }
+      };
+      request.onsuccess = (e: any) => {
+        const db = e.target.result;
+        const tx = db.transaction('transactions', 'readwrite');
+        const store = tx.objectStore('transactions');
+        store.clear().onsuccess = () => {
+          data.forEach((item) => store.put(item));
+        };
+      };
+    } catch (err) {
+      console.error('IndexedDB save error:', err);
+    }
+  };
+
+  // Local storage & IndexedDB transactions state
+  useEffect(() => {
     try {
       const savedMonth = localStorage.getItem('financas_cadal_month');
       if (savedMonth) {
@@ -164,125 +192,71 @@ export default function App() {
       console.error("Error loading saved month:", e);
     }
 
-    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      
-      if (!currentUser) {
-        // No user authenticated: fallback to LocalStorage
-        setLoading(true);
-        setIsSyncing(true);
-        try {
-          const savedTransactions = localStorage.getItem('financas_cadal_transactions');
-          if (savedTransactions) {
-            setTransactions(JSON.parse(savedTransactions));
-          } else {
-            setTransactions([]);
+    const loadData = async () => {
+      let loadedTrxs: FinanceTransaction[] = [];
+      try {
+        const savedTransactions = localStorage.getItem('financas_cadal_transactions') || localStorage.getItem('financas_cadal_transactions_backup');
+        if (savedTransactions) {
+          const parsed = JSON.parse(savedTransactions);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            loadedTrxs = parsed;
           }
-        } catch (err) {
-          console.error("Error reading local transactions:", err);
-          setTransactions([]);
         }
-        setLoading(false);
-        setIsSyncing(false);
+      } catch (err) {
+        console.error("Error reading saved transactions from localStorage:", err);
       }
-    });
 
-    return () => {
-      unsubscribeAuth();
+      // If localStorage had no records, try restoring from IndexedDB
+      if (loadedTrxs.length === 0) {
+        try {
+          const idbPromise = new Promise<FinanceTransaction[]>((resolve) => {
+            const req = indexedDB.open('FinancasAppDB', 1);
+            req.onupgradeneeded = (e: any) => {
+              const db = e.target.result;
+              if (!db.objectStoreNames.contains('transactions')) {
+                db.createObjectStore('transactions', { keyPath: 'id' });
+              }
+            };
+            req.onsuccess = (e: any) => {
+              const db = e.target.result;
+              const tx = db.transaction('transactions', 'readonly');
+              const store = tx.objectStore('transactions');
+              const getAllReq = store.getAll();
+              getAllReq.onsuccess = () => resolve(getAllReq.result || []);
+              getAllReq.onerror = () => resolve([]);
+            };
+            req.onerror = () => resolve([]);
+          });
+          const idbData = await idbPromise;
+          if (idbData && idbData.length > 0) {
+            loadedTrxs = idbData;
+          }
+        } catch (e) {
+          console.error("IndexedDB load error:", e);
+        }
+      }
+
+      setTransactions(loadedTrxs);
+      setLoading(false);
     };
+
+    loadData();
   }, []);
 
-  // Manage Firestore subscription and migration when user logs in/out
+  // Save transactions to LocalStorage AND IndexedDB whenever updated
   useEffect(() => {
-    if (!user) return;
-
-    setLoading(true);
-    setIsSyncing(true);
-
-    let unsubscribeFirestore: (() => void) | null = null;
-
-    const initializeCloudSync = async () => {
-      // 1. Check & Migrate Any Local Transactions to Cloud Automatically
-      try {
-        const savedLocal = localStorage.getItem('financas_cadal_transactions');
-        if (savedLocal) {
-          const localTrxs = JSON.parse(savedLocal) as FinanceTransaction[];
-          if (localTrxs.length > 0) {
-            const batch = writeBatch(db);
-            localTrxs.forEach((t) => {
-              const docRef = doc(db, 'users', user.uid, 'transactions', t.id);
-              batch.set(docRef, {
-                userId: user.uid,
-                type: t.type,
-                amount: t.amount,
-                category: t.category || 'Geral',
-                description: t.description || '',
-                date: t.date || new Date().toISOString(),
-                month: t.month || format(new Date(), 'yyyy-MM'),
-                createdAt: t.createdAt || new Date().toISOString(),
-                paid: t.paid !== undefined ? t.paid : true,
-                periodicity: t.periodicity || 'monthly',
-                customTag: t.customTag || ''
-              });
-            });
-            try {
-              await batch.commit();
-            } catch (writeErr) {
-              handleFirestoreError(writeErr, OperationType.WRITE, `users/${user.uid}/transactions`);
-            }
-            try {
-              localStorage.removeItem('financas_cadal_transactions');
-            } catch (e) {}
-          }
-        }
-      } catch (migrateErr) {
-        console.error("Migration error:", migrateErr);
-      }
-
-      // 2. Subscribe to Firestore Real-time Transactions from '/users/{userId}/transactions'
-      const q = query(collection(db, 'users', user.uid, 'transactions'));
-      unsubscribeFirestore = onSnapshot(q, (snapshot) => {
-        const cloudTransactions: FinanceTransaction[] = [];
-        snapshot.forEach((doc) => {
-          cloudTransactions.push({ id: doc.id, ...doc.data() } as FinanceTransaction);
-        });
-        // Sort by date descending
-        cloudTransactions.sort((a, b) => {
-          const aTime = a && a.date ? safeParseDate(a.date).getTime() : 0;
-          const bTime = b && b.date ? safeParseDate(b.date).getTime() : 0;
-          return bTime - aTime;
-        });
-        setTransactions(cloudTransactions);
-        setLoading(false);
-        setIsSyncing(false);
-      }, (err) => {
-        handleFirestoreError(err, OperationType.GET, `users/${user.uid}/transactions`);
-        setLoading(false);
-        setIsSyncing(false);
-      });
-    };
-
-    initializeCloudSync();
-
-    return () => {
-      if (unsubscribeFirestore) {
-        unsubscribeFirestore();
-      }
-    };
-  }, [user]);
-
-  // Save guest transactions only when not authenticated
-  useEffect(() => {
-    if (!loading && !user) {
+    if (!loading) {
       try {
         localStorage.setItem('financas_cadal_transactions', JSON.stringify(transactions));
+        localStorage.setItem('financas_cadal_transactions_backup', JSON.stringify(transactions));
       } catch (err) {
         console.error("Error saving transactions to localStorage:", err);
       }
+      saveToIndexedDB(transactions);
     }
-  }, [transactions, loading, user]);
+  }, [transactions, loading]);
 
-  // Save current month to LocalStorage (works for both guests & authenticated users)
+  // Save current month to LocalStorage
   useEffect(() => {
     if (!loading) {
       try {
@@ -303,72 +277,36 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `financas_familia_backup_${format(new Date(), 'yyyy-MM-dd')}.json`;
+    a.download = `financas_backup_${format(new Date(), 'yyyy-MM-dd')}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
-  const handleImportData = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportData = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = async (event) => {
+    reader.onload = (event) => {
       try {
         const data = JSON.parse(event.target?.result as string);
-        if (data.transactions) {
+        if (data.transactions && Array.isArray(data.transactions)) {
           if (confirm('Isso irá substituir todos os seus dados atuais. Deseja continuar?')) {
-            if (user) {
-              setLoading(true);
-              try {
-                // Delete existing ones first or write new ones in batch
-                const batch = writeBatch(db);
-                // Also create/import new ones
-                data.transactions.forEach((t: any) => {
-                  const docRef = doc(db, 'users', user.uid, 'transactions', t.id || Math.random().toString(36).substr(2, 9));
-                  batch.set(docRef, {
-                    userId: user.uid,
-                    type: t.type,
-                    amount: t.amount,
-                    category: t.category || 'Geral',
-                    description: t.description || '',
-                    date: t.date || new Date().toISOString(),
-                    month: t.month || format(new Date(), 'yyyy-MM'),
-                    createdAt: t.createdAt || new Date().toISOString(),
-                    paid: t.paid !== undefined ? t.paid : true,
-                    periodicity: t.periodicity || 'monthly',
-                    customTag: t.customTag || ''
-                  });
-                });
-                try {
-                  await batch.commit();
-                } catch (batchErr) {
-                  handleFirestoreError(batchErr, OperationType.WRITE, `users/${user.uid}/transactions`);
-                }
-              } catch (migrateErr) {
-                console.error("Import cloud write error:", migrateErr);
-                alert("Erro ao importar dados na nuvem.");
-              } finally {
-                setLoading(false);
-              }
-            } else {
-              const sanitizedTransactions = data.transactions.map((t: any) => ({
-                id: t.id || (Math.random().toString(36).substring(2, 9) + '_' + Date.now()),
-                type: t.type || 'expense',
-                amount: typeof t.amount === 'number' ? t.amount : parseFloat(t.amount) || 0,
-                category: t.category || 'Geral',
-                description: t.description || '',
-                date: t.date || new Date().toISOString(),
-                month: t.month || format(safeParseDate(t.date), 'yyyy-MM'),
-                createdAt: t.createdAt || new Date().toISOString(),
-                paid: t.paid !== undefined ? t.paid : true,
-                periodicity: t.periodicity || 'monthly',
-                customTag: t.customTag || ''
-              }));
-              setTransactions(sanitizedTransactions);
-            }
+            const sanitizedTransactions = data.transactions.map((t: any) => ({
+              id: t.id || (Math.random().toString(36).substring(2, 9) + '_' + Date.now()),
+              type: t.type || 'expense',
+              amount: typeof t.amount === 'number' ? t.amount : parseFloat(t.amount) || 0,
+              category: t.category || 'Geral',
+              description: t.description || '',
+              date: t.date || new Date().toISOString(),
+              month: t.month || format(safeParseDate(t.date), 'yyyy-MM'),
+              createdAt: t.createdAt || new Date().toISOString(),
+              paid: t.paid !== undefined ? t.paid : true,
+              periodicity: t.periodicity || 'monthly',
+            }));
+            setTransactions(sanitizedTransactions);
           }
         } else {
           alert('Arquivo de backup inválido.');
@@ -380,12 +318,12 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  const handleAddTransaction = async (data: Partial<FinanceTransaction>) => {
+  const handleAddTransaction = (data: Partial<FinanceTransaction>) => {
     const trxDate = data.date ? safeParseDate(data.date) : new Date();
     const newId = Math.random().toString(36).substr(2, 9);
     const newTransaction: FinanceTransaction = {
       id: newId,
-      userId: user ? user.uid : 'local-user',
+      userId: 'local-user',
       type: data.type as TransactionType,
       amount: data.amount || 0,
       description: data.description || '',
@@ -395,35 +333,15 @@ export default function App() {
       paid: data.paid !== undefined ? data.paid : true,
       periodicity: data.periodicity || 'monthly',
       recurrenceId: data.recurrenceId || undefined,
-      customTag: data.customTag || '',
       createdAt: new Date().toISOString()
     };
 
-    if (user) {
-      try {
-        await setDoc(doc(db, 'users', user.uid, 'transactions', newId), newTransaction);
-      } catch (err) {
-        handleFirestoreError(err, OperationType.CREATE, `users/${user.uid}/transactions/${newId}`);
-      }
-    } else {
-      setTransactions(prev => [newTransaction, ...prev]);
-    }
+    setTransactions(prev => [newTransaction, ...prev]);
   };
 
-  const handleDeleteTransaction = async (id: string) => {
-    if (!id) {
-      console.warn("handleDeleteTransaction called with empty/missing id");
-      return;
-    }
-    if (user) {
-      try {
-        await deleteDoc(doc(db, 'users', user.uid, 'transactions', id));
-      } catch (err) {
-        handleFirestoreError(err, OperationType.DELETE, `users/${user.uid}/transactions/${id}`);
-      }
-    } else {
-      setTransactions(prev => prev.filter(t => t && t.id && t.id !== id));
-    }
+  const handleDeleteTransaction = (id: string) => {
+    if (!id) return;
+    setTransactions(prev => prev.filter(t => t && t.id && t.id !== id));
   };
 
   const onInitiateDelete = (t: FinanceTransaction) => {
@@ -442,136 +360,61 @@ export default function App() {
     }
   };
 
-  const confirmDeleteSingle = async () => {
+  const confirmDeleteSingle = () => {
     if (!transactionToDelete) return;
-    try {
-      await handleDeleteTransaction(transactionToDelete.id);
-    } catch (err) {
-      console.error("Error in confirmDeleteSingle:", err);
-    } finally {
-      setDeleteConfirmOpen(false);
-      setTransactionToDelete(null);
-      setRelatedTransactions([]);
-    }
+    handleDeleteTransaction(transactionToDelete.id);
+    setDeleteConfirmOpen(false);
+    setTransactionToDelete(null);
+    setRelatedTransactions([]);
   };
 
-  const confirmDeleteAll = async () => {
+  const confirmDeleteAll = () => {
     if (!transactionToDelete || !relatedTransactions || relatedTransactions.length === 0) return;
-    
-    try {
-      if (user) {
-        const batch = writeBatch(db);
-        relatedTransactions.forEach(t => {
-          if (t && t.id) {
-            batch.delete(doc(db, 'users', user.uid, 'transactions', t.id));
-          }
-        });
-        try {
-          await batch.commit();
-        } catch (batchErr) {
-          handleFirestoreError(batchErr, OperationType.WRITE, `users/${user.uid}/transactions`);
-        }
-      } else {
-        const idsToDelete = new Set(relatedTransactions.filter(t => t && t.id).map(t => t.id));
-        setTransactions(prev => prev.filter(t => t && t.id && !idsToDelete.has(t.id)));
-      }
-    } catch (err) {
-      console.error("Error in confirmDeleteAll:", err);
-    } finally {
-      setDeleteConfirmOpen(false);
-      setTransactionToDelete(null);
-      setRelatedTransactions([]);
-    }
+    const idsToDelete = new Set(relatedTransactions.filter(t => t && t.id).map(t => t.id));
+    setTransactions(prev => prev.filter(t => t && t.id && !idsToDelete.has(t.id)));
+    setDeleteConfirmOpen(false);
+    setTransactionToDelete(null);
+    setRelatedTransactions([]);
   };
 
-  const handleUpdateTransaction = async (id: string, data: Partial<FinanceTransaction>) => {
-    const updatedData: Record<string, any> = { ...data };
-    if (data.date) {
-      updatedData.month = format(safeParseDate(data.date), 'yyyy-MM');
-    }
-
-    if (user) {
-      try {
-        await setDoc(doc(db, 'users', user.uid, 'transactions', id), updatedData, { merge: true });
-      } catch (err) {
-        handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}/transactions/${id}`);
-      }
-    } else {
-      setTransactions(prev => prev.map(t => {
-        if (t.id === id) {
-          const updated = { ...t, ...data };
-          if (data.date) {
-            updated.month = format(safeParseDate(data.date), 'yyyy-MM');
-          }
-          return updated;
+  const handleUpdateTransaction = (id: string, data: Partial<FinanceTransaction>) => {
+    setTransactions(prev => prev.map(t => {
+      if (t.id === id) {
+        const updated = { ...t, ...data };
+        if (data.date) {
+          updated.month = format(safeParseDate(data.date), 'yyyy-MM');
         }
-        return t;
-      }));
-    }
+        return updated;
+      }
+      return t;
+    }));
   };
 
   const changeMonth = (offset: number) => {
     setCurrentMonth(prev => offset > 0 ? addMonths(prev, 1) : subMonths(prev, 1));
   };
 
-  const handleEmailAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError('');
-    if (!authEmail || !authPassword) {
-      setAuthError('Preencha os campos de E-mail ou Usuário e Senha.');
-      return;
-    }
-    
-    const emailStr = authEmail.trim().toLowerCase();
-    const finalEmail = emailStr.includes('@') ? emailStr : `${emailStr}@financas.com`;
-    const finalPassword = authPassword.length < 6 ? authPassword.padEnd(6, '0') : authPassword;
-
-    setSubmittingAuth(true);
+  const handleRestoreBackup = () => {
     try {
-      if (authMode === 'login') {
-        try {
-          await signInWithEmailAndPassword(auth, finalEmail, finalPassword);
-        } catch (err: any) {
-          if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
-            // Se o usuário não existe ainda, cria a conta na hora de forma mágica e silenciosa!
-            await createUserWithEmailAndPassword(auth, finalEmail, finalPassword);
-          } else {
-            throw err;
-          }
-        }
-      } else {
-        await createUserWithEmailAndPassword(auth, finalEmail, finalPassword);
+      const backupStr = localStorage.getItem('financas_cadal_transactions_backup') || localStorage.getItem('financas_cadal_transactions');
+      if (!backupStr) {
+        alert("Nenhum backup automático local foi encontrado neste dispositivo.");
+        return;
       }
-      setAuthModalOpen(false);
-      setAuthEmail('');
-      setAuthPassword('');
-    } catch (err: any) {
-      console.error("Auth error:", err);
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        setAuthError('E-mail ou senha incorretos.');
-      } else if (err.code === 'auth/email-already-in-use') {
-        setAuthError('Este endereço de e-mail já está sendo utilizado.');
-      } else if (err.code === 'auth/invalid-email') {
-        setAuthError('Formato de e-mail ou usuário inválido.');
-      } else if (err.code === 'auth/weak-password') {
-        setAuthError('A senha precisa conter no mínimo 6 caracteres.');
-      } else {
-        setAuthError('Erro na autenticação. Verifique sua conexão.');
+      const backupTrxs = JSON.parse(backupStr) as FinanceTransaction[];
+      if (!backupTrxs || backupTrxs.length === 0) {
+        alert("O backup encontrado está vazio.");
+        return;
       }
-    } finally {
-      setSubmittingAuth(false);
-    }
-  };
 
-  const handleLogout = async () => {
-    if (confirm('Deseja realmente sair da nuvem? Suas informações continuam salvas em segurança para acesso posterior.')) {
-      setLoading(true);
-      try {
-        await signOut(auth);
-      } catch (err) {
-        console.error("Logout error:", err);
-        setLoading(false);
+      if (confirm(`Encontrados ${backupTrxs.length} lançamentos salvos no histórico deste navegador. Deseja restaurar estes dados?`)) {
+        setTransactions(backupTrxs);
+        localStorage.setItem('financas_cadal_transactions', JSON.stringify(backupTrxs));
+        alert(`${backupTrxs.length} lançamentos restaurados localmente com sucesso!`);
       }
+    } catch (e) {
+      console.error("Error restoring backup:", e);
+      alert("Erro ao tentar restaurar o backup.");
     }
   };
 
@@ -583,11 +426,9 @@ export default function App() {
       if (!a) return 1;
       if (!b) return -1;
       
-      // 'income' (ganho) always on top, 'expense' (perca) always on bottom
       if (a.type === 'income' && b.type === 'expense') return -1;
       if (a.type === 'expense' && b.type === 'income') return 1;
       
-      // If same type, sort by date descending
       const aTime = a.date ? safeParseDate(a.date).getTime() : 0;
       const bTime = b.date ? safeParseDate(b.date).getTime() : 0;
       return bTime - aTime;
@@ -629,17 +470,7 @@ export default function App() {
     if (searchQuery.trim() !== '') {
       const q = searchQuery.toLowerCase();
       const desc = (t.description || '').toLowerCase();
-      const tag = (t.customTag || '').toLowerCase();
-      
-      // Map tag ID to its label for easy searching
-      let tagLabel = '';
-      if (tag === 'jose') tagLabel = 'josé';
-      else if (tag === 'ster') tagLabel = 'ster óculos';
-      else if (tag === 'cacheada') tagLabel = 'black ruivo';
-      else if (tag === 'ganho') tagLabel = 'ganho';
-      else if (tag === 'perca') tagLabel = 'perca';
-      
-      matchesSearch = desc.includes(q) || tag.includes(q) || tagLabel.includes(q);
+      matchesSearch = desc.includes(q);
     }
     
     return matchesPeriodicity && matchesSearch;
@@ -652,6 +483,80 @@ export default function App() {
           <Wallet className="h-12 w-12 text-blue-600" />
           <p className="text-gray-500 font-medium">Carregando...</p>
         </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-100/80 flex items-center justify-center p-4 font-sans">
+        <motion.div 
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-sm bg-white rounded-2xl shadow-xl border border-slate-200 p-6 sm:p-8 space-y-6"
+        >
+          <div className="text-center space-y-2">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-blue-50 border border-blue-100 text-blue-600 mb-1">
+              <Lock className="h-7 w-7" />
+            </div>
+            <h1 className="text-2xl font-bold font-heading text-slate-800">Acesso Restrito</h1>
+            <p className="text-xs text-slate-500 max-w-xs mx-auto">
+              Digite seu usuário e sua senha para entrar no sistema.
+            </p>
+          </div>
+
+          {loginError && (
+            <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 flex items-center gap-2 text-xs text-rose-600 font-medium animate-shake">
+              <AlertCircle className="h-4 w-4 shrink-0 text-rose-500" />
+              <span>{loginError}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleLoginSubmit} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="login-user" className="text-[10px] font-bold uppercase text-slate-400 flex items-center gap-1">
+                <User className="h-3 w-3" /> Login / Usuário
+              </Label>
+              <Input
+                id="login-user"
+                type="text"
+                value={loginUser}
+                onChange={(e) => setLoginUser(e.target.value)}
+                placeholder="nos"
+                className="rounded-xl border-slate-200 focus-visible:ring-blue-500/25 focus-visible:border-blue-500 bg-slate-50/50"
+                required
+                autoFocus
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="login-password" className="text-[10px] font-bold uppercase text-slate-400 flex items-center gap-1">
+                <KeyRound className="h-3 w-3" /> Senha
+              </Label>
+              <Input
+                id="login-password"
+                type="password"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                placeholder="••••••••"
+                className="rounded-xl border-slate-200 focus-visible:ring-blue-500/25 focus-visible:border-blue-500 bg-slate-50/50"
+                required
+              />
+            </div>
+
+            <Button
+              type="submit"
+              className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md cursor-pointer transition-all flex items-center justify-center gap-2 text-sm mt-2"
+            >
+              <Lock className="h-4 w-4" />
+              Entrar
+            </Button>
+          </form>
+
+          <div className="pt-2 text-center border-t border-slate-100 text-[11px] text-slate-400 font-medium">
+            <span>🔒 Controle Financeiro Protegido</span>
+          </div>
+        </motion.div>
       </div>
     );
   }
@@ -722,52 +627,16 @@ export default function App() {
               </Button>
             </div>
             
-            {/* Cloud and Backup controls */}
-            <div className="flex items-center gap-2">
-              {user ? (
-                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-100 p-0.5 rounded-lg pl-2">
-                  <div className="flex items-center gap-1 text-[9px] font-bold text-emerald-600 uppercase tracking-wider">
-                    <Cloud className="h-3 w-3 text-emerald-500 shrink-0" />
-                    <span className="hidden sm:inline">Sincronizado</span>
-                  </div>
-                  <span className="text-[10px] font-semibold text-slate-500 max-w-[70px] sm:max-w-[100px] truncate" title={user.email || ''}>
-                    {user.email?.endsWith('@financas.com') ? user.email.split('@')[0] : user.email}
-                  </span>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    type="button"
-                    onClick={handleLogout} 
-                    title="Sair da Conta (Nuvem)"
-                    className="h-6 w-6 hover:bg-white rounded-md text-slate-450 hover:text-rose-600 transition-all cursor-pointer"
-                  >
-                    <LogOut className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              ) : (
-                <Button 
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setAuthModalOpen(true)}
-                  className="bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200/65 font-bold text-[9px] px-2.5 h-8 rounded-lg uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-xs transition-all shrink-0"
-                >
-                  <CloudOff className="h-3 w-3 text-slate-400 shrink-0" />
-                  Nuvem
-                </Button>
-              )}
-            </div>
-            
-            <div className="hidden sm:flex items-center gap-1">
+            <div className="flex items-center gap-1">
               <Button 
                 variant="outline" 
                 size="sm" 
                 onClick={handleExportData}
-                className="text-[9px] font-bold uppercase tracking-wider h-8 rounded-lg border-slate-200 hover:bg-slate-50 cursor-pointer"
+                className="text-[9px] font-bold uppercase tracking-wider h-8 rounded-lg border-slate-200 hover:bg-slate-50 cursor-pointer hidden sm:inline-flex"
               >
                 Exportar
               </Button>
-              <div className="relative">
+              <div className="relative hidden sm:block">
                 <input
                   type="file"
                   id="import-data"
@@ -784,118 +653,20 @@ export default function App() {
                   Importar
                 </Button>
               </div>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleLogout}
+                title="Bloquear e Sair"
+                className="text-[9px] font-bold uppercase tracking-wider h-8 rounded-lg border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 text-slate-600 cursor-pointer flex items-center gap-1.5 ml-1 transition-all"
+              >
+                <Lock className="h-3 w-3 text-slate-500" />
+                <span className="hidden sm:inline">Bloquear</span>
+              </Button>
             </div>
           </div>
         </div>
-
-        {/* Auth Sincronizar Modal */}
-        <Dialog open={authModalOpen && !user} onOpenChange={setAuthModalOpen}>
-          <DialogContent className="sm:max-w-[420px] rounded-2xl border-slate-200 bg-white shadow-2xl p-5">
-            <DialogHeader>
-              <DialogTitle className="text-xl font-bold flex items-center gap-2">
-                <Cloud className="h-6 w-6 text-blue-600 animate-bounce animate-duration-1000" />
-                Sincronizar com Nuvem
-              </DialogTitle>
-              <DialogDescription className="text-slate-500 text-xs mt-1">
-                Guarde suas receitas e despesas na na nuvem para não perder nada e acessar do seu celular ou do computador de forma sincronizada!
-              </DialogDescription>
-            </DialogHeader>
-
-            {authError && (
-              <div className="bg-rose-50 border border-rose-150 rounded-xl p-3 flex items-start gap-2.5 text-xs text-rose-600 animate-shake">
-                <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                <span>{authError}</span>
-              </div>
-            )}
-
-            {/* Direct Help Banner for specific credentials */}
-            <div className="bg-blue-50/80 p-3 rounded-xl border border-blue-100 text-xs text-blue-700 space-y-1">
-              <span className="font-bold flex items-center gap-1">🔑 Acesso Sincronizado:</span>
-              <p className="text-[11px] leading-relaxed text-blue-600 font-medium">
-                Digite o usuário <strong className="font-extrabold bg-white px-1.5 py-0.5 rounded border border-blue-200 text-blue-700">cerveja</strong> e a sua senha cadastrada no campo correspondente!
-              </p>
-            </div>
-
-            {isIframe && (
-              <div className="bg-amber-50/90 border border-amber-150 p-3 rounded-xl text-[11px] text-amber-800 space-y-2 leading-relaxed">
-                <span className="font-extrabold flex items-center gap-1 text-amber-900">💡 Dica Importante para Celular:</span>
-                <p>
-                  Para não precisar logar de novo ao atualizar a página no celular, use o link direto do app fora do chat:
-                </p>
-                <div className="flex gap-2">
-                  <input 
-                    type="text" 
-                    readOnly 
-                    value={window.location.href} 
-                    className="bg-white border border-amber-200 rounded px-2 py-1 text-[10px] select-all font-mono flex-1 text-slate-700"
-                    id="direct-app-link"
-                  />
-                  <Button 
-                    type="button"
-                    size="sm" 
-                    className="h-7 text-[10px] bg-amber-600 hover:bg-amber-700 text-white font-bold px-2 rounded cursor-pointer animate-pulse hover:animate-none"
-                    onClick={() => {
-                      const el = document.getElementById('direct-app-link') as HTMLInputElement;
-                      if (el) {
-                        el.select();
-                        navigator.clipboard.writeText(el.value);
-                        alert('Link copiado! Abra no Safari ou Chrome do celular.');
-                      }
-                    }}
-                  >
-                    Copiar
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            <form onSubmit={handleEmailAuth} className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="auth-email-global" className="text-[10px] font-bold uppercase text-slate-400">E-mail ou Usuário</Label>
-                <Input
-                  id="auth-email-global"
-                  type="text"
-                  value={authEmail}
-                  onChange={(e) => setAuthEmail(e.target.value)}
-                  placeholder="Ex: cerveja ou seu e-mail"
-                  className="rounded-xl border-slate-250 focus-visible:ring-blue-500/25 focus-visible:border-blue-500 placeholder:text-slate-350 bg-white"
-                  required
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="auth-password-global" className="text-[10px] font-bold uppercase text-slate-400">Senha</Label>
-                <Input
-                  id="auth-password-global"
-                  type="password"
-                  value={authPassword}
-                  onChange={(e) => setAuthPassword(e.target.value)}
-                  placeholder="Sua senha secreta"
-                  className="rounded-xl border-slate-250 focus-visible:ring-blue-500/25 focus-visible:border-blue-500 bg-white"
-                  required
-                />
-              </div>
-
-              <Button
-                type="submit"
-                disabled={submittingAuth}
-                className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md cursor-pointer transition-all flex items-center justify-center gap-2"
-              >
-                {submittingAuth ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <LogIn className="h-4 w-4" />
-                )}
-                Entrar e Sincronizar
-              </Button>
-            </form>
-
-            <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150 text-[10px] text-slate-500 font-semibold space-y-1 text-center">
-              <span className="flex items-center justify-center gap-1.5"><Smartphone className="h-3.5 w-3.5 text-blue-500 shrink-0" /> Perfeito para usar no celular e PC!</span>
-              <span className="flex items-center justify-center gap-1.5 text-emerald-600"><Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" /> Seus dados atuais migram automaticamente!</span>
-            </div>
-          </DialogContent>
-        </Dialog>
+      </header>
 
         {/* Modal de Confirmação de Exclusão de Lançamento Recorrente */}
         <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
@@ -950,7 +721,6 @@ export default function App() {
             </div>
           </DialogContent>
         </Dialog>
-      </header>
 
       <main className="flex-1 max-w-7xl mx-auto w-full p-6 space-y-6">
         {/* KPI Row */}
@@ -1103,15 +873,6 @@ export default function App() {
 
                             <div className="min-w-0">
                               <p className={`font-semibold text-slate-700 text-sm leading-snug flex flex-wrap items-center gap-1.5 truncate ${t.paid === false ? 'text-slate-500 font-medium' : ''}`}>
-                                {t.customTag && (() => {
-                                  const tagObj = TAG_PRESETS.find(p => p.id === t.customTag);
-                                  if (!tagObj) return null;
-                                  return (
-                                    <span className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-extrabold rounded border ${tagObj.bg} shrink-0`}>
-                                      <span>{tagObj.label}</span>
-                                    </span>
-                                  );
-                                })()}
                                 <span className="truncate">{t.description}</span>
                               </p>
                               <div className="flex items-center gap-2 mt-1">
@@ -1552,37 +1313,6 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
         </div>
       </div>
 
-      {/* Marcador / Atribuição (Emoji) - Beautiful grid of presets */}
-      <div className="grid gap-1.5">
-        <Label className="text-[10px] font-bold uppercase text-slate-400 ml-0.5">Responsável / Marcador (Emoji)</Label>
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            type="button"
-            onClick={() => setCustomTag('')}
-            className={`px-2.5 py-1.5 text-[11px] font-bold rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
-              customTag === ''
-                ? 'bg-slate-200 border-slate-300 text-slate-800 shadow-xs'
-                : 'bg-white border-slate-200 text-slate-400 hover:text-slate-600 hover:border-slate-300'
-            }`}
-          >
-            Sem Marcador
-          </button>
-          {TAG_PRESETS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => setCustomTag(p.id)}
-              className={`px-2.5 py-1.5 text-[11px] font-bold rounded-lg border transition-all cursor-pointer flex items-center ${
-                customTag === p.id
-                  ? `${p.bg} border-blue-500 ring-2 ring-blue-50/50 shadow-xs`
-                  : 'bg-white border-slate-200 text-slate-600 hover:text-slate-800 hover:border-slate-300'
-              }`}
-            >
-              <span>{p.label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
 
       {/* Payment and Options Split Layout - Highly compact and neat */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">

@@ -162,6 +162,7 @@ function MainApp() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [transactionToDelete, setTransactionToDelete] = useState<FinanceTransaction | null>(null);
   const [relatedTransactions, setRelatedTransactions] = useState<FinanceTransaction[]>([]);
+  const [editingTransaction, setEditingTransaction] = useState<FinanceTransaction | null>(null);
   const [periodicityFilter, setPeriodicityFilter] = useState<'all' | 'monthly' | 'yearly'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -395,10 +396,16 @@ function MainApp() {
   const handleDeleteTransaction = (id: string) => {
     if (!id) return;
     setTransactions(prev => prev.filter(t => t && t.id && t.id !== id));
+    setTimeout(() => {
+      if (document.body) {
+        document.body.style.pointerEvents = '';
+        document.body.style.overflow = '';
+      }
+    }, 50);
   };
 
   const onInitiateDelete = (t: FinanceTransaction) => {
-    if (!t) return;
+    if (!t || !t.id) return;
     try {
       const related = getRelatedTransactions(t, transactions);
       if (related && related.length > 1) {
@@ -410,24 +417,38 @@ function MainApp() {
       }
     } catch (err) {
       console.error("Error initiating transaction delete:", err);
+      handleDeleteTransaction(t.id);
     }
   };
 
   const confirmDeleteSingle = () => {
     if (!transactionToDelete) return;
-    handleDeleteTransaction(transactionToDelete.id);
+    const targetId = transactionToDelete.id;
     setDeleteConfirmOpen(false);
     setTransactionToDelete(null);
     setRelatedTransactions([]);
+    setTimeout(() => {
+      handleDeleteTransaction(targetId);
+      if (document.body) {
+        document.body.style.pointerEvents = '';
+        document.body.style.overflow = '';
+      }
+    }, 50);
   };
 
   const confirmDeleteAll = () => {
     if (!transactionToDelete || !relatedTransactions || relatedTransactions.length === 0) return;
     const idsToDelete = new Set(relatedTransactions.filter(t => t && t.id).map(t => t.id));
-    setTransactions(prev => prev.filter(t => t && t.id && !idsToDelete.has(t.id)));
     setDeleteConfirmOpen(false);
     setTransactionToDelete(null);
     setRelatedTransactions([]);
+    setTimeout(() => {
+      setTransactions(prev => prev.filter(t => t && t.id && !idsToDelete.has(t.id)));
+      if (document.body) {
+        document.body.style.pointerEvents = '';
+        document.body.style.overflow = '';
+      }
+    }, 50);
   };
 
   const handleUpdateTransaction = (id: string, data: Partial<FinanceTransaction>) => {
@@ -950,11 +971,16 @@ function MainApp() {
                             </span>
 
                             <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                              <EditTransactionDialog 
-                                transaction={t} 
-                                onUpdate={handleUpdateTransaction} 
-                                onDelete={onInitiateDelete}
-                              />
+                              <Button 
+                                type="button"
+                                variant="ghost" 
+                                size="icon" 
+                                onClick={() => setEditingTransaction(t)}
+                                title="Editar lançamento"
+                                className="h-8 w-8 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
                               <Button 
                                 variant="ghost" 
                                 size="icon" 
@@ -1061,6 +1087,13 @@ function MainApp() {
             </Card>
           </div>
         </div>
+
+        <EditTransactionModal 
+          transaction={editingTransaction}
+          onClose={() => setEditingTransaction(null)}
+          onUpdate={handleUpdateTransaction}
+          onDelete={onInitiateDelete}
+        />
       </main>
 
       <footer className="h-12 bg-white border-t border-slate-200 px-8 flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-widest">
@@ -1173,30 +1206,20 @@ function AddTransactionDialog({ onAdd }: { onAdd: (data: any) => void }) {
   );
 }
 
-function EditTransactionDialog({ 
+function EditTransactionModal({ 
   transaction, 
+  onClose,
   onUpdate,
   onDelete
 }: { 
-  transaction: FinanceTransaction; 
+  transaction: FinanceTransaction | null; 
+  onClose: () => void;
   onUpdate: (id: string, data: any) => void;
   onDelete?: (t: FinanceTransaction) => void;
 }) {
-  const [open, setOpen] = useState(false);
-
   return (
-    <>
-      <Button 
-        type="button"
-        variant="ghost" 
-        size="icon" 
-        onClick={() => setOpen(true)}
-        title="Editar lançamento"
-        className="h-8 w-8 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-      >
-        <Pencil className="h-4 w-4" />
-      </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={!!transaction} onOpenChange={(open) => { if (!open) onClose(); }}>
+      {transaction && (
         <DialogContent className="sm:max-w-[480px] max-w-[95%] rounded-lg border border-slate-200 shadow-2xl p-5 bg-white">
           <DialogHeader className="pb-2 border-b border-slate-100">
             <DialogTitle className="font-heading text-lg font-bold text-slate-800">Editar Transação</DialogTitle>
@@ -1205,18 +1228,18 @@ function EditTransactionDialog({
             initialData={transaction}
             onSave={(data) => {
               onUpdate(transaction.id, data);
-              setOpen(false);
+              onClose();
             }} 
             onDelete={onDelete ? () => {
-              setOpen(false);
+              onClose();
               setTimeout(() => {
                 onDelete(transaction);
-              }, 100);
+              }, 50);
             } : undefined}
           />
         </DialogContent>
-      </Dialog>
-    </>
+      )}
+    </Dialog>
   );
 }
 

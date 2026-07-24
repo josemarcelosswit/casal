@@ -896,15 +896,20 @@ export default function App() {
                               {t.type === 'income' ? '+' : '-'} R$ {t.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </span>
 
-                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <EditTransactionDialog transaction={t} onUpdate={handleUpdateTransaction} />
+                            <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                              <EditTransactionDialog 
+                                transaction={t} 
+                                onUpdate={handleUpdateTransaction} 
+                                onDelete={onInitiateDelete}
+                              />
                               <Button 
                                 variant="ghost" 
                                 size="icon" 
                                 onClick={() => onInitiateDelete(t)}
-                                className="h-7 w-7 text-slate-350 hover:text-rose-500 hover:bg-rose-50 rounded-md transition-colors"
+                                title="Excluir lançamento"
+                                className="h-8 w-8 text-slate-350 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                               >
-                                <Trash2 className="h-3.5 w-3.5" />
+                                <Trash2 className="h-4 w-4" />
                               </Button>
                             </div>
                           </div>
@@ -1088,58 +1093,79 @@ function AddTransactionDialog({ onAdd }: { onAdd: (data: any) => void }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button className="bg-blue-600 hover:bg-blue-700 shadow-sm gap-2 rounded-lg" />}>
+    <>
+      <Button 
+        type="button"
+        onClick={() => setOpen(true)}
+        className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-sm gap-2 rounded-lg cursor-pointer"
+      >
         <Plus className="h-4 w-4" /> Novo Lançamento
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-[480px] max-w-[95%] rounded-lg border border-slate-200 shadow-2xl p-5 bg-white">
-        <DialogHeader className="pb-2 border-b border-slate-100">
-          <DialogTitle className="font-heading text-lg font-bold text-slate-800">Nova Transação</DialogTitle>
-        </DialogHeader>
-        <TransactionForm 
-          onSave={(data) => {
-            onAdd(data);
-            setOpen(false);
-          }} 
-        />
-      </DialogContent>
-    </Dialog>
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-[480px] max-w-[95%] rounded-lg border border-slate-200 shadow-2xl p-5 bg-white">
+          <DialogHeader className="pb-2 border-b border-slate-100">
+            <DialogTitle className="font-heading text-lg font-bold text-slate-800">Nova Transação</DialogTitle>
+          </DialogHeader>
+          <TransactionForm 
+            onSave={(data) => {
+              onAdd(data);
+              setOpen(false);
+            }} 
+          />
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
-function EditTransactionDialog({ transaction, onUpdate }: { transaction: FinanceTransaction, onUpdate: (id: string, data: any) => void }) {
+function EditTransactionDialog({ 
+  transaction, 
+  onUpdate,
+  onDelete
+}: { 
+  transaction: FinanceTransaction; 
+  onUpdate: (id: string, data: any) => void;
+  onDelete?: (t: FinanceTransaction) => void;
+}) {
   const [open, setOpen] = useState(false);
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          className="h-8 w-8 text-slate-300 hover:text-blue-500 hover:bg-blue-50 rounded-lg"
-        />
-      }>
+    <>
+      <Button 
+        type="button"
+        variant="ghost" 
+        size="icon" 
+        onClick={() => setOpen(true)}
+        title="Editar lançamento"
+        className="h-8 w-8 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+      >
         <Pencil className="h-4 w-4" />
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-[480px] max-w-[95%] rounded-lg border border-slate-200 shadow-2xl p-5 bg-white">
-        <DialogHeader className="pb-2 border-b border-slate-100">
-          <DialogTitle className="font-heading text-lg font-bold text-slate-800">Editar Transação</DialogTitle>
-        </DialogHeader>
-        <TransactionForm 
-          initialData={transaction}
-          onSave={(data) => {
-            onUpdate(transaction.id, data);
-            setOpen(false);
-          }} 
-        />
-      </DialogContent>
-    </Dialog>
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-[480px] max-w-[95%] rounded-lg border border-slate-200 shadow-2xl p-5 bg-white">
+          <DialogHeader className="pb-2 border-b border-slate-100">
+            <DialogTitle className="font-heading text-lg font-bold text-slate-800">Editar Transação</DialogTitle>
+          </DialogHeader>
+          <TransactionForm 
+            initialData={transaction}
+            onSave={(data) => {
+              onUpdate(transaction.id, data);
+              setOpen(false);
+            }} 
+            onDelete={onDelete ? () => {
+              setOpen(false);
+              onDelete(transaction);
+            } : undefined}
+          />
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
-function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void, initialData?: FinanceTransaction }) {
+function TransactionForm({ onSave, onDelete, initialData }: { onSave: (data: any) => void, onDelete?: () => void, initialData?: FinanceTransaction }) {
   const [type, setType] = useState<TransactionType>(initialData?.type || 'expense');
-  const [amount, setAmount] = useState(initialData?.amount.toString() || '');
+  const [amount, setAmount] = useState(initialData?.amount !== undefined ? initialData.amount.toString() : '');
   const [description, setDescription] = useState(initialData?.description || '');
   const [date, setDate] = useState(initialData ? format(safeParseDate(initialData.date), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'));
   const [paid, setPaid] = useState<boolean>(initialData ? initialData.paid !== false : false);
@@ -1457,13 +1483,26 @@ function TransactionForm({ onSave, initialData }: { onSave: (data: any) => void,
         </motion.div>
       )}
 
-      {/* Submit Button - Crisp and robust */}
-      <Button 
-        type="submit" 
-        className="w-full bg-blue-600 hover:bg-blue-700 h-11 text-xs font-bold uppercase tracking-wider rounded-lg shadow-md hover:shadow-lg transition-all mt-4"
-      >
-        {initialData ? 'Atualizar Lançamento' : 'Confirmar Lançamento'}
-      </Button>
+      {/* Action Buttons - Crisp and robust */}
+      <div className="flex items-center gap-2.5 mt-4">
+        {initialData && onDelete && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onDelete}
+            className="flex-1 bg-rose-50 text-rose-700 hover:bg-rose-100 border-rose-200 h-11 text-xs font-bold uppercase tracking-wider rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+          >
+            <Trash2 className="h-4 w-4 shrink-0 text-rose-600" />
+            <span>Apagar</span>
+          </Button>
+        )}
+        <Button 
+          type="submit" 
+          className="flex-1 bg-blue-600 hover:bg-blue-700 h-11 text-xs font-bold uppercase tracking-wider rounded-lg shadow-md hover:shadow-lg transition-all text-white cursor-pointer"
+        >
+          {initialData ? 'Atualizar' : 'Confirmar'}
+        </Button>
+      </div>
     </form>
   );
 }

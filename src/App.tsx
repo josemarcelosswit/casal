@@ -988,7 +988,7 @@ export default function App() {
               <div className="p-5 border-b border-slate-50 flex items-center justify-between">
                 <h2 className="text-base font-semibold text-slate-800 flex items-center gap-2 font-heading">
                   <Receipt className="h-4.5 w-4.5 text-blue-500" />
-                  Fluxo de Caixa Mensal
+                  Lançamentos
                 </h2>
                 <AddTransactionDialog onAdd={handleAddTransaction} />
               </div>

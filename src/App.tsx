@@ -49,6 +49,55 @@ function safeParseDate(dateVal: any): Date {
   return new Date();
 }
 
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error?: Error;
+}
+
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, ErrorBoundaryState> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("ErrorBoundary caught an error:", error, errorInfo);
+  }
+
+  handleReset = () => {
+    this.setState({ hasError: false, error: undefined });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans">
+          <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-xl max-w-md w-full text-center space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <h2 className="text-xl font-bold text-slate-800 font-heading">Ops! Ocorreu um problema.</h2>
+            <p className="text-xs text-slate-500 max-w-xs mx-auto">
+              Houve uma falha inesperada ao exibir os dados. Clique abaixo para reiniciar a tela sem perder seus lançamentos.
+            </p>
+            <Button 
+              onClick={this.handleReset}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl h-11 px-6 text-xs uppercase tracking-wider cursor-pointer shadow-md"
+            >
+              Recarregar Tela
+            </Button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function getRelatedTransactions(target: FinanceTransaction, allTransactions: FinanceTransaction[]): FinanceTransaction[] {
   if (!target) return [];
   if (target.recurrenceId) {
@@ -77,7 +126,7 @@ function getRelatedTransactions(target: FinanceTransaction, allTransactions: Fin
   return [target];
 }
 
-export default function App() {
+function MainApp() {
   const [loading, setLoading] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
@@ -318,25 +367,29 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  const handleAddTransaction = (data: Partial<FinanceTransaction>) => {
-    const trxDate = data.date ? safeParseDate(data.date) : new Date();
-    const newId = Math.random().toString(36).substr(2, 9);
-    const newTransaction: FinanceTransaction = {
-      id: newId,
-      userId: 'local-user',
-      type: data.type as TransactionType,
-      amount: data.amount || 0,
-      description: data.description || '',
-      category: 'Geral',
-      date: data.date || new Date().toISOString(),
-      month: format(trxDate, 'yyyy-MM'),
-      paid: data.paid !== undefined ? data.paid : true,
-      periodicity: data.periodicity || 'monthly',
-      recurrenceId: data.recurrenceId || undefined,
-      createdAt: new Date().toISOString()
-    };
+  const handleAddTransaction = (data: Partial<FinanceTransaction> | Partial<FinanceTransaction>[]) => {
+    const items = Array.isArray(data) ? data : [data];
+    if (items.length === 0) return;
 
-    setTransactions(prev => [newTransaction, ...prev]);
+    const newTransactions: FinanceTransaction[] = items.map((item, index) => {
+      const trxDate = item.date ? safeParseDate(item.date) : new Date();
+      return {
+        id: Math.random().toString(36).substr(2, 9) + '_' + (Date.now() + index),
+        userId: 'local-user',
+        type: (item.type || 'expense') as TransactionType,
+        amount: typeof item.amount === 'number' && !isNaN(item.amount) ? item.amount : 0,
+        description: item.description || '',
+        category: 'Geral',
+        date: item.date || new Date().toISOString(),
+        month: format(trxDate, 'yyyy-MM'),
+        paid: item.paid !== undefined ? item.paid : true,
+        periodicity: item.periodicity || 'monthly',
+        recurrenceId: item.recurrenceId || undefined,
+        createdAt: new Date().toISOString()
+      };
+    });
+
+    setTransactions(prev => [...newTransactions, ...prev]);
   };
 
   const handleDeleteTransaction = (id: string) => {
@@ -684,7 +737,7 @@ export default function App() {
               <div className="bg-slate-50 border border-slate-150 rounded-md p-3 text-xs text-slate-500 space-y-1.5 font-sans">
                 <span className="font-bold text-slate-700 flex items-center gap-1">📌 Informações do Grupo:</span>
                 <p>• Total de parcelas encontradas no sistema: <strong className="text-slate-800 font-extrabold">{relatedTransactions.length} meses/lançamentos</strong>.</p>
-                <p>• Valor de cada lançamento: <strong className="text-slate-800 font-extrabold">R$ {transactionToDelete ? transactionToDelete.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : '0,00'}</strong>.</p>
+                <p>• Valor de cada lançamento: <strong className="text-slate-800 font-extrabold">R$ {transactionToDelete && typeof transactionToDelete.amount === 'number' ? transactionToDelete.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0,00'}</strong>.</p>
               </div>
               <p className="text-xs text-slate-400">
                 Escolha a opção desejada. Nenhuma das opções irá apagar dados de outros grupos ou transações não relacionadas.
@@ -893,7 +946,7 @@ export default function App() {
 
                           <div className="flex items-center gap-4 pl-3 shrink-0">
                             <span className={`font-semibold text-sm tabular-nums tracking-tight font-heading ${t.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                              {t.type === 'income' ? '+' : '-'} R$ {t.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              {t.type === 'income' ? '+' : '-'} R$ {(t && typeof t.amount === 'number' ? t.amount : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </span>
 
                             <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
@@ -1026,6 +1079,8 @@ export default function App() {
 }
 
 function KPICard({ label, amount, color, isPercent = false, subtext }: { label: string, amount: number, color: 'emerald' | 'slate' | 'amber' | 'blue' | 'rose' | 'orange', isPercent?: boolean, subtext?: string }) {
+  const safeVal = (typeof amount === 'number' && !isNaN(amount) && isFinite(amount)) ? amount : 0;
+
   const textColors = {
     emerald: 'text-emerald-650',
     slate: 'text-slate-800',
@@ -1053,7 +1108,7 @@ function KPICard({ label, amount, color, isPercent = false, subtext }: { label: 
         </div>
         <div className="flex items-baseline gap-1.5">
           <p className={`text-2xl sm:text-2.5xl font-semibold font-heading tracking-tight tabular-nums leading-none ${textColors[color]}`}>
-            {isPercent ? `${amount.toFixed(0)}%` : `R$ ${amount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            {isPercent ? `${safeVal.toFixed(0)}%` : `R$ ${safeVal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           </p>
         </div>
       </div>
@@ -1154,7 +1209,9 @@ function EditTransactionDialog({
             }} 
             onDelete={onDelete ? () => {
               setOpen(false);
-              onDelete(transaction);
+              setTimeout(() => {
+                onDelete(transaction);
+              }, 100);
             } : undefined}
           />
         </DialogContent>
@@ -1192,23 +1249,24 @@ function TransactionForm({ onSave, onDelete, initialData }: { onSave: (data: any
     e.preventDefault();
     
     // Improved number parsing for Brazilian format (handle comma as decimal)
-    const cleanAmount = amount.replace(',', '.');
+    const cleanAmount = (amount || '').toString().replace(',', '.');
     const parsedAmount = parseFloat(cleanAmount);
     
-    if (isNaN(parsedAmount)) return;
+    if (isNaN(parsedAmount) || parsedAmount <= 0) return;
 
     if (!initialData && isRecurring && parseInt(recurringMonths) > 1) {
       const baseDate = safeParseDate(date ? date + 'T12:00:00' : new Date());
-      const monthsCount = parseInt(recurringMonths) || 1;
-      const recurrenceId = 'group_' + Math.random().toString(36).substr(2, 9);
+      const monthsCount = Math.max(1, parseInt(recurringMonths) || 1);
+      const recurrenceId = 'group_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
       
       const installmentAmount = recurringType === 'split'
         ? Math.round((parsedAmount / monthsCount) * 100) / 100
         : parsedAmount;
 
+      const items: Partial<FinanceTransaction>[] = [];
       for (let i = 0; i < monthsCount; i++) {
         const nextDate = addMonths(baseDate, i);
-        onSave({
+        items.push({
           type,
           amount: installmentAmount,
           description: recurringType === 'split' 
@@ -1221,6 +1279,7 @@ function TransactionForm({ onSave, onDelete, initialData }: { onSave: (data: any
           customTag: customTag
         });
       }
+      onSave(items);
     } else {
       const finalDate = safeParseDate(date ? date + 'T12:00:00' : new Date());
       onSave({
@@ -1441,7 +1500,7 @@ function TransactionForm({ onSave, onDelete, initialData }: { onSave: (data: any
                 }`}
               >
                 <span>Dividir valor</span>
-                <span className="text-[8px] font-normal text-slate-400">Divide {amount || '0,00'} em {recurringMonths}x</span>
+                <span className="text-[8px] font-normal text-slate-400">Divide {amount || '0,00'} em {recurringMonths || '1'}x</span>
               </button>
               
               <button
@@ -1460,20 +1519,24 @@ function TransactionForm({ onSave, onDelete, initialData }: { onSave: (data: any
           </div>
 
           {(() => {
-            const monthsVal = parseInt(recurringMonths) || 1;
-            const amtVal = parseFloat(amount.replace(',', '.')) || 0;
-            if (monthsVal > 1 && amtVal > 0) {
+            const monthsVal = Math.max(1, parseInt(recurringMonths) || 1);
+            const amtStr = (amount || '').toString().replace(',', '.');
+            const amtVal = parseFloat(amtStr);
+            const safeAmt = (typeof amtVal === 'number' && !isNaN(amtVal) && isFinite(amtVal) && amtVal > 0) ? amtVal : 0;
+
+            if (monthsVal > 1 && safeAmt > 0) {
               if (recurringType === 'split') {
-                const perMonthReal = Math.round((amtVal / monthsVal) * 100) / 100;
+                const perMonthReal = Math.round((safeAmt / monthsVal) * 100) / 100;
+                const safePerMonth = (typeof perMonthReal === 'number' && !isNaN(perMonthReal) && isFinite(perMonthReal)) ? perMonthReal : 0;
                 return (
                   <div className="text-[9px] font-semibold text-blue-600 bg-blue-50/50 p-2 rounded-md border border-blue-100 flex items-center gap-1">
-                    <span>💳 {monthsVal} lançamentos de <strong>R$ {perMonthReal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> por mês.</span>
+                    <span>💳 {monthsVal} lançamentos de <strong>R$ {safePerMonth.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> por mês.</span>
                   </div>
                 );
               } else {
                 return (
                   <div className="text-[9px] font-semibold text-slate-600 bg-slate-100/50 p-2 rounded-md border border-slate-200 flex items-center gap-1">
-                    <span>🔄 {monthsVal} lançamentos recorrentes de <strong>R$ {amtVal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>.</span>
+                    <span>🔄 {monthsVal} lançamentos recorrentes de <strong>R$ {safeAmt.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>.</span>
                   </div>
                 );
               }
@@ -1504,5 +1567,13 @@ function TransactionForm({ onSave, onDelete, initialData }: { onSave: (data: any
         </Button>
       </div>
     </form>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <MainApp />
+    </ErrorBoundary>
   );
 }
